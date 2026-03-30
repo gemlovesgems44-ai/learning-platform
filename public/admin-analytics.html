@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics - Learning Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/admin-analytics.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Analytics Dashboard</h1>
+        <nav>
+            <ul>
+                <li><a href="admin-dashboard.html">Dashboard</a></li>
+                <li><a href="admin-analytics.html">Analytics</a></li>
+                <li><a href="admin-courses.html">Manage Courses</a></li>                
+                <li><a href="index.html" onclick="logout()">Logout</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main>
+        <section class="analytics-container">
+            <div class="chart-section">
+                <h2>User Activity Trend</h2>
+                <canvas id="activityChart"></canvas>
+            </div>
+
+            <div class="chart-section">
+                <h2>Course Completion Rate</h2>
+                <canvas id="completionChart"></canvas>
+            </div>
+
+            <div class="chart-section">
+                <h2>Most Popular Courses</h2>
+                <canvas id="popularCoursesChart"></canvas>
+            </div>
+
+            <div class="chart-section">
+                <h2>Time Spent Per Lesson</h2>
+                <canvas id="timeSpentChart"></canvas>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <h3>Average Completion Time</h3>
+                    <p class="stat-value" id="avg-completion">0 hours</p>
+                </div>
+                <div class="stat-box">
+                    <h3>User Retention Rate</h3>
+                    <p class="stat-value" id="retention-rate">0%</p>
+                </div>
+                <div class="stat-box">
+                    <h3>Active Users This Week</h3>
+                    <p class="stat-value" id="active-week">0</p>
+                </div>
+                <div class="stat-box">
+                    <h3>Total Platform Usage</h3>
+                    <p class="stat-value" id="total-usage">0 hours</p>
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <h2>User Engagement by Course</h2>
+                <table class="analytics-table">
+                    <thead>
+                        <tr>
+                            <th>Course</th>
+                            <th>Users Enrolled</th>
+                            <th>Completed</th>
+                            <th>Completion %</th>
+                            <th>Avg Time (hrs)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="engagement-table"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+    <script src="js/admin-analytics.js"></script>
+</body>
+</html>

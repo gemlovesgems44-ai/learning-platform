@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Learning Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Welcome to The Learning Platform</h1>
+        <nav>
+            <ul>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="courses.html">Courses</a></li>
+                <li><a href="progress.html">Progress</a></li>
+                <li><a href="practice.html">Practice Area</a></li>
+                <li><a href="admin-login.html" class="admin-btn">Admin Login</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main>
+        <section class="welcome">
+            <h2>Explore Our Courses</h2>
+            <p>Join us to enhance your skills and knowledge through our diverse range of courses.</p>
+            <a href="courses.html" class="btn">View Courses</a>
+        </section>
+
+        <section class="progress-overview">
+            <h2>Your Progress Overview</h2>
+            <div class="stats">
+                <div class="stat-card">
+                    <h3>Lessons Completed</h3>
+                    <p class="stat-number" id="completed-lessons">0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Hours</h3>
+                    <p class="stat-number" id="total-hours">0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Courses Started</h3>
+                    <p class="stat-number" id="courses-started">0</p>
+                </div>
+            </div>
+
+            <div class="recent-progress">
+                <h3>Recent Activity</h3>
+                <div id="recent-lessons"></div>
+            </div>
+
+            <div class="next-steps">
+                <h3>Suggested Next Step</h3>
+                <div id="next-suggestion"></div>
+            </div>
+
+            <a href="progress.html" class="btn">View Detailed Progress</a>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 Learning Platform. All rights reserved.</p>
+    </footer>
+    <script src="js/index.js"></script>
+</body>
+</html>

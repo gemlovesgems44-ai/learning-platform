@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+    <header>
+        <h1>Admin Dashboard</h1>
+        <nav>
+            <ul>
+                <li><a href="admin-dashboard.html">Dashboard</a></li>
+                <li><a href="admin-analytics.html">Analytics</a></li>
+                <li><a href="admin-courses.html">Manage Courses</a></li>                
+                <li><a href="index.html" onclick="logout()">Logout</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main>
+        <section class="dashboard-overview">
+            <h2>Platform Overview</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>Total Users</h3>
+                    <p class="metric-value" id="total-users">0</p>
+                </div>
+                <div class="metric-card">
+                    <h3>Active Users (Today)</h3>
+                    <p class="metric-value" id="active-users">0</p>
+                </div>
+                <div class="metric-card">
+                    <h3>Total Lessons Completed</h3>
+                    <p class="metric-value" id="total-completed">0</p>
+                </div>
+                <div class="metric-card">
+                    <h3>Platform Efficiency</h3>
+                    <p class="metric-value" id="efficiency">0%</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="charts-section">
+            <div class="chart-container">
+                <h3>User Activity Over Time</h3>
+                <div id="activity-chart"></div>
+            </div>
+            <div class="chart-container">
+                <h3>Course Popularity</h3>
+                <div id="course-chart"></div>
+            </div>
+        </section>
+
+        <section class="recent-activity">
+            <h3>Recent User Activity</h3>
+            <table id="activity-table">
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Action</th>
+                        <th>Lesson/Course</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody id="activity-body"></tbody>
+            </table>
+        </section>
+    </main>
+    <script src="js/admin.js"></script>
+</body>
+</html>

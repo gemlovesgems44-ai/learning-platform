@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lesson</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/lesson.css" />
+</head>
+<body>
+    <header>
+        <h1>Lesson View</h1>
+        <nav>
+            <ul>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="courses.html">Courses</a></li>
+                <li><a href="progress.html">Progress</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="lesson-layout">
+        <!-- Left: lesson list -->
+        <aside class="lesson-sidebar" aria-label="Course navigation">
+            <h2 id="course-title" class="course-title">Course</h2>
+            <p id="module-progress" class="module-progress">0/3 completed</p>
+
+            <ul id="module-nav-list" class="module-nav-list">
+                <!-- populated by lesson.js -->
+            </ul>
+        </aside>
+
+
+        <!-- Middle: current lesson -->
+        <section class="lesson-content">
+            <h2 id="lesson-title">Lesson Title</h2>
+            <div id="lesson-body">Select a module from the left.</div>
+        </section>
+    </main>
+
+     <!-- Bottom: coach -->
+    <section class="coach-panel">
+        <h3>Coach</h3>
+        <div class="coach-buttons">
+            <button type="button" class="coach-btn" data-action="explain">Explain simply</button>
+            <button type="button" class="coach-btn" data-action="example">Show me an example</button>
+            <button type="button" class="coach-btn" data-action="next">What do I do next?</button>
+            <button type="button" class="coach-btn" data-action="stuck">I'm stuck</button>
+        </div>
+        <div id="coach-response" class="coach-response">Ask for help using a button above.</div>
+    </section>
+    
+    <script src="js/lesson.js"></script>
+</body>
+</html>

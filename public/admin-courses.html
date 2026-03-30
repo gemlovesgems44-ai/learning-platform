@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Manage Courses</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/admin-courses.css">
+</head>
+<body>
+    <header>
+        <h1>Manage Courses</h1>
+        <nav>
+            <ul>
+                <li><a href="admin-dashboard.html">Dashboard</a></li>
+                <li><a href="admin-analytics.html">Analytics</a></li>
+                <li><a href="admin-courses.html">Manage Courses</a></li>                
+                <li><a href="index.html" onclick="logout()">Logout</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main>
+        <div class="container">
+            <h2>All Courses</h2>
+            <button class="add-course-btn" onclick="openCourseModal()">+ Add New Course</button>
+            <div class="courses-list" id="coursesList">
+                <!-- Courses will be populated here -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for Adding/Editing Lesson -->
+    <div id="lessonModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeLessonModal()">&times;</span>
+            <h2>Add New Lesson</h2>
+            <form id="lessonForm">
+                <div class="form-group">
+                    <label for="lessonTitle">Lesson Title:</label>
+                    <input type="text" id="lessonTitle" required>
+                </div>
+                <div class="form-group">
+                    <label for="lessonContent">Content:</label>
+                    <textarea id="lessonContent" required></textarea>
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn btn-cancel" onclick="closeLessonModal()">Cancel</button>
+                    <button type="submit" class="btn btn-submit">Save Lesson</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/admin-courses.js"></script>
+</body>
+</html>
