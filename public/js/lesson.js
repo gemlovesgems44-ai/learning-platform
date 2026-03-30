@@ -288,27 +288,9 @@ function renderCurrentItem(itemKey) {
             setCurrentItem(nextItemKey);
         });
     } else if (canCompleteCourse) {
-        actionBtn.addEventListener('click', async () => {
-            try {
-                const courseId = getCourseId();
-                const userId = Number(localStorage.getItem('userId') || 1);
-
-                const res = await fetch('/backend/api/modules.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ courseId, userId })
-                });
-
-                if (!res.ok) {
-                    const errText = await res.text();
-                    throw new Error(`Completion save failed: ${errText}`);
-                }
-
-                window.location.href = `/progress.html?courseId=${courseId}&completed=1`;
-            } catch (error) {
-                console.error(error);
-                alert('Error saving completion.');
-            }
+        actionBtn.addEventListener('click', () => {
+            const courseId = getCourseId();
+            window.location.href = `/public/progress.html`;
         });
     }
 }
