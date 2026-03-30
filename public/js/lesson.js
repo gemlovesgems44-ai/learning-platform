@@ -273,7 +273,7 @@ function renderCurrentItem(itemKey) {
                     body: JSON.stringify({ courseId, userId })
                 });
 
-                window.location.href = `public/progress.html`;
+                window.location.href = `/public/progress.html`;
             } catch (error) {
                 console.error(error);
                 alert('Error saving completion.');
