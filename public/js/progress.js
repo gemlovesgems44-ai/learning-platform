@@ -61,18 +61,25 @@ function loadProgress() {
 }
 
 function loadSuggestions() {
+    // Get current user ID from localStorage (fallback to 1 for guest/default user).
     const userId = localStorage.getItem('userId') || 1;
+
+    // Request suggested courses for this user from backend API.
     fetch(`/backend/api/suggestions.php?userId=${userId}`)
-        .then(response => response.json())
+        .then(response => response.json()) // Parse JSON response body.
         .then(data => {
+            // Get the UI container where suggestion cards will be rendered.
             const suggestions = document.getElementById('suggestions');
-            console.log('Suggestions API response:', data); // DEBUG
-            
+            console.log('Suggestions API response:', data); // DEBUG: inspect response shape.
+
+            // If API returns no suggestions, show a friendly empty state message.
             if (!data || data.length === 0) {
                 suggestions.innerHTML = '<p>No suggestions available yet.</p>';
                 return;
             }
-            
+
+            // Render each suggestion as a card with title, description, and start link.
+            // Fallback field names are included to handle backend naming differences.
             suggestions.innerHTML = data.map(item => `
                 <div class="suggestion-card">
                     <h3>${item.title || item.courseName || 'Course'}</h3>
@@ -82,6 +89,7 @@ function loadSuggestions() {
             `).join('');
         })
         .catch(error => {
+            // Handle API/network errors and show a failure message in the UI.
             console.error('Error loading suggestions:', error);
             document.getElementById('suggestions').innerHTML = '<p>Could not load suggestions.</p>';
         });

@@ -52,9 +52,14 @@ function loadProgressOverview(userId) {
     fetch(`/backend/api/modules.php`)
         .then(response => response.json())
         .then(data => {
-            document.getElementById('courses-started').textContent = data.length > 0 ? Math.ceil(Math.random() * data.length) : 0;
-            // Calculate total hours (assuming 1 hour per lesson)
-            document.getElementById('total-hours').textContent = Math.floor(Math.random() * 50) + 1;
+            document.getElementById('courses-started').textContent =
+                data.length > 0 ? Math.ceil(Math.random() * data.length) : 0;
+
+            // Actual tracked time (from main.js)
+            const userId = localStorage.getItem('userId') || 1;
+            const seconds = Number(localStorage.getItem(`lp_time_seconds_user_${userId}`) || 0);
+            const hours = (seconds / 3600).toFixed(1);
+            document.getElementById('total-hours').textContent = hours;
         })
         .catch(error => console.error('Error loading courses:', error));
 }
