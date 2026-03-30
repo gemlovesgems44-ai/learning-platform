@@ -39,9 +39,35 @@ function getCourseId() {
 // Loads modules for the selected course from the backend API.
 async function fetchModules(courseId) {
     const res = await fetch(`/backend/api/modules.php?courseId=${encodeURIComponent(courseId)}`);
-    if (!res.ok) throw new Error('Failed to load modules');
+    if (!res.ok) {
+        const errText = await res.text();
+        console.error('modules.php error:', errText);
+        throw new Error('Failed to load modules');
+    }
     const data = await res.json();
     return Array.isArray(data) ? data : [];
+}
+
+// Persist per-lesson completion to backend progress API.
+async function saveLessonProgress(lessonId) {
+    try {
+        const userId = Number(localStorage.getItem('userId') || 1);
+        const courseId = getCourseId();
+
+        await fetch('/backend/api/progress.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId,
+                courseId,
+                lessonId,
+                completed: true
+            })
+        });
+    } catch (e) {
+        // Do not block UI if backend save fails.
+        console.warn('Could not save lesson progress:', e);
+    }
 }
 
 // Loads lessons for the selected course from the backend API.
@@ -265,15 +291,20 @@ function renderCurrentItem(itemKey) {
         actionBtn.addEventListener('click', async () => {
             try {
                 const courseId = getCourseId();
-                const userId = localStorage.getItem('userId') || 1;
+                const userId = Number(localStorage.getItem('userId') || 1);
 
-                await fetch('/backend/api/modules.php', {
+                const res = await fetch('/backend/api/modules.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ courseId, userId })
                 });
 
-                window.location.href = `/public/progress.html`;
+                if (!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(`Completion save failed: ${errText}`);
+                }
+
+                window.location.href = `/progress.html?courseId=${courseId}&completed=1`;
             } catch (error) {
                 console.error(error);
                 alert('Error saving completion.');
@@ -291,6 +322,7 @@ function setCurrentItem(itemKey) {
         const lessonId = Number(itemKey.replace('lesson-', ''));
         if (!Number.isNaN(lessonId)) {
             completedLessonIds.add(lessonId);
+            saveLessonProgress(lessonId); // <-- persist progress
         }
     }
 
