@@ -84,7 +84,7 @@ function loadSuggestions() {
                 <div class="suggestion-card">
                     <h3>${item.title || item.courseName || 'Course'}</h3>
                     <p>${item.description || item.courseDescription || 'Explore this course'}</p>
-                    <a href="lesson.html?courseId=${item.id || item.courseId}" class="btn btn-primary">Start</a>
+                    <a href="lesson.html?moduleId=${item.moduleId || item.module_id || item.id || item.courseId}" class="btn btn-primary">Start</a>
                 </div>
             `).join('');
         })

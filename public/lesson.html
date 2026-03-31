@@ -20,7 +20,6 @@
     </header>
 
     <main class="lesson-layout">
-        <!-- Left: lesson list -->
         <aside class="lesson-sidebar" aria-label="Course navigation">
             <h2 id="course-title" class="course-title">Course</h2>
             <p id="module-progress" class="module-progress">0/3 completed</p>
@@ -30,15 +29,12 @@
             </ul>
         </aside>
 
-
-        <!-- Middle: current lesson -->
         <section class="lesson-content">
             <h2 id="lesson-title">Lesson Title</h2>
             <div id="lesson-body">Select a module from the left.</div>
         </section>
     </main>
 
-     <!-- Bottom: coach -->
     <section class="coach-panel">
         <h3>Coach</h3>
         <div class="coach-buttons">
@@ -49,7 +45,13 @@
         </div>
         <div id="coach-response" class="coach-response">Ask for help using a button above.</div>
     </section>
-    
+
+    <!-- <script>
+        const params = new URLSearchParams(window.location.search);
+        if (!params.get('moduleId')) {
+            window.location.href = 'lesson.html?moduleId=1';
+        }
+    </script> -->
     <script src="js/lesson.js"></script>
 </body>
 </html>

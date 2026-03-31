@@ -17,24 +17,24 @@ function fetchCourses() {
 
 function displayCourses(courses) {
     const container = document.getElementById('courses-container');
-    
+
     if (courses.length === 0) {
         container.innerHTML = '<p>No courses available</p>';
         return;
     }
-    
+
     let html = '<div class="courses-grid">';
-    
+
     courses.forEach(course => {
         html += `
             <div class="course-card">
                 <h3>${course.title}</h3>
                 <p>${course.description}</p>
-                <a href="lesson.html?courseId=${course.id}" class="btn">Start Course</a>
+                <a href="lesson.html?moduleId=${course.id}" class="btn">Start Course</a>
             </div>
         `;
     });
-    
+
     html += '</div>';
     container.innerHTML = html;
 }

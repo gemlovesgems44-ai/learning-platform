@@ -61,17 +61,40 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data = json_decode(file_get_contents("php://input"));
+
         if (!isset($data->userId) || !isset($data->lessonId)) {
             http_response_code(400);
             echo json_encode(["message" => "User ID and Lesson ID required"]);
             exit;
         }
 
+        $userId = (int)$data->userId;
+        $lessonId = (int)$data->lessonId;
+
+        if ($userId <= 0 || $lessonId <= 0) {
+            http_response_code(400);
+            echo json_encode(["message" => "Valid userId and lessonId required"]);
+            exit;
+        }
+
+        $checkSql = "SELECT id FROM progress WHERE user_id = :userId AND lesson_id = :lessonId LIMIT 1";
+        $checkStmt = $db->prepare($checkSql);
+        $checkStmt->execute([
+            ':userId' => $userId,
+            ':lessonId' => $lessonId
+        ]);
+
+        if ($checkStmt->fetch(PDO::FETCH_ASSOC)) {
+            http_response_code(200);
+            echo json_encode(["message" => "Progress already saved"]);
+            exit;
+        }
+
         $columns = ["user_id", "lesson_id"];
         $values  = [":userId", ":lessonId"];
         $params  = [
-            ':userId' => (int)$data->userId,
-            ':lessonId' => (int)$data->lessonId
+            ':userId' => $userId,
+            ':lessonId' => $lessonId
         ];
 
         if ($hasCompleted) {
