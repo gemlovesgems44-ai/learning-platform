@@ -16,7 +16,6 @@ h1 {
     color:#333;
     padding: 20px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);}
-
 .course-list {
     display: flex;
     flex-wrap: wrap;
@@ -99,4 +98,72 @@ h1 {
 
 .btn:hover {
     background-color: #0056b3;
+}
+
+.courses-carousel {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 20px;
+}
+
+.carousel-viewport {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+}
+
+.carousel-viewport::-webkit-scrollbar {
+    height: 8px;
+}
+.carousel-viewport::-webkit-scrollbar-thumb {
+    background: #c7d7f5;
+    border-radius: 999px;
+}
+
+.carousel-track {
+    display: flex;
+    gap: 20px;
+}
+
+/* Show one card per view */
+.carousel-track .course-card {
+    flex: 0 0 92%;
+    max-width: 100%;
+    scroll-snap-align: start;
+
+    /* Consistent internal spacing */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-sizing: border-box;
+    padding: 24px;
+}
+
+/* Remove uneven default margins; let gap control spacing */
+.carousel-track .course-card h3,
+.carousel-track .course-card p {
+    margin: 0;
+}
+
+/* Keep button compact and aligned */
+.carousel-track .course-card .btn {
+    align-self: flex-start;
+    margin: 0;
+}
+
+.carousel-btn {
+    border: none;
+    background: #007bff;
+    color: #fff;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 24px;
+    line-height: 1;
+}
+.carousel-btn:hover {
+    background: #0056b3;
 }

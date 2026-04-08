@@ -18,23 +18,36 @@ function fetchCourses() {
 function displayCourses(courses) {
     const container = document.getElementById('courses-container');
 
-    if (courses.length === 0) {
+    if (!courses || courses.length === 0) {
         container.innerHTML = '<p>No courses available</p>';
         return;
     }
 
-    let html = '<div class="courses-grid">';
+    container.innerHTML = `
+        <div class="courses-carousel">
+            <button class="carousel-btn prev" id="carousel-prev" aria-label="Previous courses">‹</button>
 
-    courses.forEach(course => {
-        html += `
-            <div class="course-card">
-                <h3>${course.title}</h3>
-                <p>${course.description}</p>
-                <a href="lesson.html?moduleId=${course.id}" class="btn">Start Course</a>
+            <div class="carousel-viewport" id="courses-viewport">
+                <div class="carousel-track">
+                    ${courses.map(course => `
+                        <article class="course-card">
+                            <h3>${course.title || 'Course'}</h3>
+                            <p>${course.description || ''}</p>
+                            <a href="lesson.html?moduleId=${course.id}" class="btn">Start Course</a>
+                        </article>
+                    `).join('')}
+                </div>
             </div>
-        `;
-    });
 
-    html += '</div>';
-    container.innerHTML = html;
+            <button class="carousel-btn next" id="carousel-next" aria-label="Next courses">›</button>
+        </div>
+    `;
+
+    const viewport = document.getElementById('courses-viewport');
+    document.getElementById('carousel-prev')?.addEventListener('click', () => {
+        viewport.scrollBy({ left: -viewport.clientWidth, behavior: 'smooth' });
+    });
+    document.getElementById('carousel-next')?.addEventListener('click', () => {
+        viewport.scrollBy({ left: viewport.clientWidth, behavior: 'smooth' });
+    });
 }
