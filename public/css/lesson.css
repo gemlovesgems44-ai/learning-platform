@@ -1,9 +1,41 @@
 .lesson-layout {
     display: grid;
-    grid-template-columns: 300px 1fr;
+    grid-template-columns: 280px 1fr 0;
     gap: 20px;
-    padding: 20px;
     align-items: start;
+}
+
+.practice-sandbox {
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: width .25s ease, opacity .25s ease;
+    width: 0;
+    background: #fff;
+    border-radius: 8px;
+    padding: 0;
+}
+
+.lesson-layout.sandbox-open {
+    grid-template-columns: 280px 1fr minmax(360px, 40%);
+}
+
+.lesson-layout.sandbox-open .practice-sandbox {
+    width: 100%;
+    opacity: 1;
+    pointer-events: auto;
+    padding: 16px;
+    border: 1px solid #e5e7eb;
+}
+
+.practice-options {
+    display: grid;
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.practice-option-btn {
+    text-align: left;
 }
 
 .lesson-sidebar,

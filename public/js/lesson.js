@@ -10,6 +10,9 @@ let currentItemKey = null;
 // Tracks which lesson IDs have been opened by the user.
 let completedLessonIds = new Set();
 
+// Tracks which lesson practice questions were answered correctly.
+let passedPracticeLessonIds = new Set();
+
 // Stores coach interaction state.
 const coachState = { stuckCount: 0, lastAction: null };
 
@@ -90,6 +93,43 @@ async function saveLessonProgress(lessonId) {
     }
 }
 
+// Save practice progress to the progress API.
+async function savePracticeProgress() {
+    localStorage.setItem(
+        getPracticeStorageKey(),
+        JSON.stringify([...passedPracticeLessonIds])
+    );
+}
+
+// Get the practice storage key.
+function getPracticeStorageKey() {
+    const userId = Number(localStorage.getItem('userId') || 1);
+    return `lp_practice_passed_module_${getModuleId()}_user_${userId}`;
+}
+
+// Load practice progress.
+function loadPracticeProgress() {
+    try {
+        const raw = localStorage.getItem(getPracticeStorageKey());
+        const arr = raw ? JSON.parse(raw) : [];
+        passedPracticeLessonIds = new Set(Array.isArray(arr) ? arr.map(Number) : []);
+    } catch {
+        passedPracticeLessonIds = new Set();
+    }
+}
+
+// Get the practice lesson IDs.
+function getPracticeLessonIds() {
+    return COURSE_ITEMS
+        .filter(item =>
+            item.key.startsWith('lesson-') &&
+            String(item.question || '').trim().length > 0 &&
+            parseOptions(item.options).length > 0
+        )
+        .map(item => Number(item.lessonId || item.key.replace('lesson-', '')))
+        .filter(id => !Number.isNaN(id));
+}
+
 // Build the full navigation list: intro, lessons, summary.
 function buildCourseItems(modules, lessons) {
     const moduleTitle = getModuleTitle();
@@ -106,9 +146,15 @@ function buildCourseItems(modules, lessons) {
 
     const lessonItems = orderedLessons.map((lesson) => ({
         key: `lesson-${lesson.id}`,
+        lessonId: Number(lesson.id),
         label: lesson.title || 'Lesson',
         content: lesson.content || '<p>No lesson content available.</p>',
-        module_id: lesson.module_id
+        module_id: lesson.module_id,
+        question: lesson.question,
+        options: lesson.options,
+        correctanswer: lesson.correctanswer,
+        correctfeedback: lesson.correctfeedback,
+        wrongfeedback: lesson.wrongfeedback
     }));
 
     const summaryContent = lessonItems.length
@@ -200,15 +246,6 @@ function parseAndStructureContent(html) {
         prompt = noteEl.textContent.trim();
     }
 
-    // DEBUG: remove after checking
-    console.log('parseAndStructureContent result:', {
-        explanation,
-        keyPoints,
-        visual,
-        prompt,
-        rawHtml: html
-    });
-
     return { explanation, keyPoints, visual, prompt };
 }
 
@@ -220,6 +257,9 @@ function renderCurrentItem(itemKey) {
 
     if (!lessonTitleEl || !lessonBodyEl || !item) return;
 
+    // Collapse sandbox when switching main content.
+    setSandboxExpanded(false);
+
     lessonTitleEl.textContent = item.label;
 
     const structured = parseAndStructureContent(item.content);
@@ -228,10 +268,19 @@ function renderCurrentItem(itemKey) {
     const hasNextItem = currentIndex >= 0 && currentIndex < COURSE_ITEMS.length - 1;
     const nextItemKey = hasNextItem ? COURSE_ITEMS[currentIndex + 1].key : null;
 
+    const isLessonItem = item.key.startsWith('lesson-');
+    const lessonId = isLessonItem ? Number(item.key.replace('lesson-', '')) : 0;
+
     const totalLessons = COURSE_ITEMS.filter(entry => entry.key.startsWith('lesson-')).length;
     const allLessonsCompleted = totalLessons > 0 && completedLessonIds.size >= totalLessons;
+
+    const requiredPracticeIds = getPracticeLessonIds();
+    const allPracticeCompleted = requiredPracticeIds.length > 0
+        ? requiredPracticeIds.every(id => passedPracticeLessonIds.has(id))
+        : allLessonsCompleted; // fallback if no practice questions configured
+
     const isCourseSummary = item.key === 'course-summary';
-    const canCompleteCourse = isCourseSummary && allLessonsCompleted;
+    const canCompleteCourse = isCourseSummary && allPracticeCompleted;
 
     lessonBodyEl.innerHTML = `
         <div class="lesson-structure">
@@ -274,9 +323,13 @@ function renderCurrentItem(itemKey) {
                     type="button"
                     class="lesson-action-btn"
                     id="next-step-btn"
-                    ${!hasNextItem && !canCompleteCourse ? 'disabled' : ''}
+                    ${!hasNextItem && !isLessonItem && !canCompleteCourse ? 'disabled' : ''}
                 >
-                    ${hasNextItem ? 'Next step' : (canCompleteCourse ? 'Module complete' : 'Complete all lessons first')}
+                    ${isLessonItem
+                        ? 'Open practice'
+                        : hasNextItem
+                            ? 'Next step'
+                            : (canCompleteCourse ? 'Mark module done' : 'Complete all practice first')}
                 </button>
             </section>
         </div>
@@ -285,10 +338,12 @@ function renderCurrentItem(itemKey) {
     const actionBtn = document.getElementById('next-step-btn');
     if (!actionBtn) return;
 
-    if (hasNextItem) {
+    if (isLessonItem && lessonId > 0) {
         actionBtn.addEventListener('click', () => {
-            setCurrentItem(nextItemKey);
+            renderPractice(item, nextItemKey);
         });
+    } else if (hasNextItem) {
+        actionBtn.addEventListener('click', () => setCurrentItem(nextItemKey));
     } else if (canCompleteCourse) {
         actionBtn.addEventListener('click', () => {
             const moduleId = getModuleId();
@@ -339,7 +394,7 @@ function buildCoachResponse(action) {
 
     coachState.lastAction = action;
 
-    const ctx = getLessonContext();
+    const ctx = getLessonContext() || { title: 'this topic', explanation: '', keyPoints: [] };
     const kp = firstKeyPoint(ctx);
 
     if (action === 'explain') {
@@ -350,15 +405,15 @@ function buildCoachResponse(action) {
 
     if (action === 'example') {
         return kp
-            ? `Example for "${ctx.title}": apply "${kp}" to a small real case you know, then note one outcome.`
+            ? `Example for "${ctx.title}": Try this: use "${kp}" in a simple real-life situation you know, then note one outcome.`
             : `Example for "${ctx.title}": pick one concept and show how you would use it in practice.`;
     }
 
     if (action === 'next') {
-        if (ctx.keyPoints.length >= 2) {
-            return `Next: complete one task for "${ctx.keyPoints[0]}", then move to "${ctx.keyPoints[1]}".`;
-        }
-        return `Next: finish this section of "${ctx.title}" and complete one quick practice step.`;
+        const base = (ctx.keyPoints.length >= 2)
+            ? `Next: complete one task for "${ctx.keyPoints[0]}", then move to "${ctx.keyPoints[1]}".`
+            : `Next: finish this section of "${ctx.title}" and complete one quick practice step.`;
+        return addEncouragement(base);
     }
 
     // stuck
@@ -366,28 +421,28 @@ function buildCoachResponse(action) {
         ? `If stuck on "${ctx.title}", isolate this point: "${kp}", and try only that step first.`
         : `If stuck on "${ctx.title}", break it into one tiny step and retry.`;
 
-    if (coachState.stuckCount > 1) {
-        msg += ' Then write one question about exactly what is unclear.';
+    if (coachState.stuckCount === 2) {
+        msg += ' Let’s slow down. Do only the first step.';
+    } else if (coachState.stuckCount >= 3) {
+        msg += ' It’s okay. Go back to the start and try again slowly.';
     }
+
     return msg;
 }
 
-// Show text with a simple typing effect.
-function typeText(element, text, speed = 16) {
-    if (!element) return;
-
-    element.textContent = '';
-    let index = 0;
-
-    const timer = setInterval(() => {
-        element.textContent += text.charAt(index);
-        index += 1;
-
-        if (index >= text.length) {
-            clearInterval(timer);
-        }
-    }, speed);
+function addEncouragement(text) {
+    const phrases = [
+        "You're doing well.",
+        "Keep going.",
+        "You're on the right track.",
+        "Nice work so far."
+    ];
+    const random = phrases[Math.floor(Math.random() * phrases.length)];
+    return `${random} ${text}`;
 }
+
+// DELETE this invalid top-level line:
+// return addEncouragement(`Next: complete one task for "${ctx.keyPoints[0]}"`);
 
 // Wire up the coach buttons.
 function initCoach() {
@@ -402,14 +457,34 @@ function initCoach() {
     });
 }
 
+// Add missing typing effect function (used by initCoach).
+function typeText(element, text, speed = 16) {
+    if (!element) return;
+    element.textContent = '';
+
+    let i = 0;
+    const timer = setInterval(() => {
+        element.textContent += text.charAt(i);
+        i += 1;
+        if (i >= text.length) clearInterval(timer);
+    }, speed);
+}
+
 // Main page setup.
 async function initLessonPage() {
     try {
         const moduleId = getModuleId();
 
         if (!moduleId) {
-            throw new Error('Missing moduleId in URL');
+            const lessonTitleEl = document.getElementById('lesson-title');
+            const lessonBodyEl = document.getElementById('lesson-body');
+            if (lessonTitleEl) lessonTitleEl.textContent = 'No module selected';
+            if (lessonBodyEl) lessonBodyEl.innerHTML = '<p>Please open this page from a module link.</p>';
+            initCoach();
+            return;
         }
+
+        loadPracticeProgress(); // <- add this after moduleId is known
 
         const [modules, lessons] = await Promise.all([
             fetchModules(moduleId),
@@ -436,3 +511,92 @@ async function initLessonPage() {
 }
 
 document.addEventListener('DOMContentLoaded', initLessonPage);
+
+function parseOptions(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return parsed;
+        } catch (_) {}
+        return raw.split('|').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+}
+
+function setSandboxExpanded(open) {
+    const layout = document.getElementById('lesson-layout');
+    if (!layout) return;
+    layout.classList.toggle('sandbox-open', !!open);
+}
+
+function renderPractice(item, nextItemKey) {
+    const box = document.getElementById('practice-content');
+    if (!box) return;
+
+    const lessonId = Number(item.lessonId || String(item.key || '').replace('lesson-', ''));
+
+    const q = item.question || '';
+    const options = parseOptions(item.options);
+    const correctAnswer = String(item.correctanswer ?? '').trim().toLowerCase();
+    const correctFeedback = item.correctfeedback || 'Correct.';
+    const wrongFeedback = item.wrongfeedback || 'Try again.';
+
+    if (!q || options.length === 0) {
+        box.innerHTML = `
+            <p>No practice set for this lesson yet.</p>
+            <button type="button" class="lesson-action-btn" id="practice-next-btn">
+                ${nextItemKey ? 'Next part' : 'Finish'}
+            </button>
+        `;
+        const nextBtn = document.getElementById('practice-next-btn');
+        nextBtn?.addEventListener('click', () => {
+            if (nextItemKey) setCurrentItem(nextItemKey);
+        });
+        setSandboxExpanded(true);
+        return;
+    }
+
+    box.innerHTML = `
+        <p><strong>${q}</strong></p>
+        <div class="practice-options">
+            ${options.map((opt, i) => `
+                <button type="button" class="practice-option-btn" data-opt="${String(opt).replace(/"/g, '&quot;')}">
+                    ${String.fromCharCode(65 + i)}. ${opt}
+                </button>
+            `).join('')}
+        </div>
+        <p id="practice-feedback"></p>
+        <button type="button" class="lesson-action-btn" id="practice-next-btn" disabled>
+            ${nextItemKey ? 'Next part' : 'Finish'}
+        </button>
+    `;
+
+    const feedbackEl = document.getElementById('practice-feedback');
+    const nextBtn = document.getElementById('practice-next-btn');
+
+    box.querySelectorAll('.practice-option-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const picked = (btn.dataset.opt || '').trim().toLowerCase();
+            const ok = picked === correctAnswer;
+
+            feedbackEl.textContent = ok
+                ? correctFeedback
+                : `${wrongFeedback} You must answer correctly to continue.`;
+            feedbackEl.style.color = ok ? '#1b5e20' : '#b71c1c';
+
+            nextBtn.disabled = !ok;
+
+            if (ok && !Number.isNaN(lessonId)) {
+                passedPracticeLessonIds.add(lessonId);
+                savePracticeProgress();
+            }
+        });
+    });
+
+    nextBtn?.addEventListener('click', () => {
+        if (nextItemKey) setCurrentItem(nextItemKey);
+    });
+
+    setSandboxExpanded(true);
+}

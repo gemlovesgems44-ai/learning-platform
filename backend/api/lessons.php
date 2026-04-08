@@ -45,10 +45,11 @@ $moduleId = isset($_GET['moduleId']) ? (int)$_GET['moduleId'] : 0;
 try {
     // If a specific module ID is provided, return only lessons for that module.
     if ($moduleId > 0) {
-        $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at
-                FROM lessons l
-                WHERE l.module_id = :moduleId
-                ORDER BY l.id ASC";
+        $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at,
+               l.question, l.options, l.correctanswer, l.correctfeedback, l.wrongfeedback
+        FROM lessons l
+        WHERE l.module_id = :moduleId
+        ORDER BY l.id ASC";
         $stmt = $db->prepare($sql);
         $stmt->execute([':moduleId' => $moduleId]);
 
@@ -85,9 +86,10 @@ try {
 
     // If no filters are provided, return all lessons.
     } else {
-        $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at
-                FROM lessons l
-                ORDER BY l.id ASC";
+        $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at,
+               l.question, l.options, l.correctanswer, l.correctfeedback, l.wrongfeedback
+        FROM lessons l
+        ORDER BY l.id ASC";
         $stmt = $db->prepare($sql);
         $stmt->execute();
     }
