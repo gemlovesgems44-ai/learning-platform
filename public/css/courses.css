@@ -12,8 +12,10 @@ body {
 
 h1 {
     text-align: center;
-    color: #333;
-}
+    /* background-color: #333; */
+    color:#333;
+    padding: 20px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);}
 
 .course-list {
     display: flex;
