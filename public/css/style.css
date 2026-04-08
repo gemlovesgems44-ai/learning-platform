@@ -31,9 +31,15 @@ h2 {
     padding: 20px;
 }
 
+header nav {
+    display: flex;
+    justify-content: center;
+}
+
 header nav ul {
     list-style: none;
     display: flex;
+    justify-content: center; /* centers links horizontally */
     gap: 20px;
     flex-wrap: wrap;
     padding: 20px;
@@ -66,6 +72,15 @@ nav {
 
 .welcome {
     padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px; /* consistent spacing between sections/items */
+}
+
+.welcome h2,
+.welcome p {
+    margin: 0;
+    padding: 0; /* remove uneven inherited padding */
 }
 
 footer {
@@ -104,7 +119,7 @@ footer {
     background: #f5f5f5;
     padding: 30px;
     border-radius: 8px;
-    margin-top: 40px;
+    margin-top: 10px;
 }
 
 .stats {
@@ -155,21 +170,27 @@ footer {
     border-bottom: 1px solid #eee;
 }
 
-.suggestion-card {
+.next-steps {
     background: #e7f3ff;
-    padding: 15px;
     border-left: 4px solid #007bff;
-    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px; /* consistent spacing between heading/content/button/cards */
 }
 
-.suggestion-card h4 {
-    margin: 0 0 10px 0;
+.next-steps h4,
+.next-steps p,
+.next-steps ul,
+.next-steps .suggestion-card {
+    margin: 0;
 }
 
-.suggestion-card p {
-    margin: 0 0 15px 0;
-    color: #666;
+.next-steps .suggestion-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
+
 .admin-btn {
     background-color: #d32f2f;
     color: white;
@@ -190,9 +211,7 @@ footer {
     border-radius: 4px;
     text-decoration: none;
     font-weight: bold;
-    margin-top: 40px;
-}
-
-.welcome p {
-    padding: 20px;
+    margin-top: 0;
+    align-self: flex-start;   /* prevents full-width stretch */
+    width: fit-content;       /* keep button only as wide as text */
 }
