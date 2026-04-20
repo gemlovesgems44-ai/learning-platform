@@ -62,14 +62,19 @@ async function fetchModules(moduleId) {
 // Load lessons for the selected module from the backend API.
 async function fetchLessons(moduleId) {
     const res = await fetch(`/backend/api/lessons.php?moduleId=${encodeURIComponent(moduleId)}`);
+    const text = await res.text();
+
     if (!res.ok) {
-        const errText = await res.text();
-        console.error('lessons.php error:', errText);
-        throw new Error('Failed to load lessons');
+        console.error('lessons.php error:', text);
+        throw new Error(`Failed to load lessons (${res.status}): ${text}`);
     }
 
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    try {
+        const data = JSON.parse(text);
+        return Array.isArray(data) ? data : [];
+    } catch {
+        throw new Error(`Invalid JSON from lessons.php: ${text}`);
+    }
 }
 
 // Save lesson completion to the progress API.
@@ -121,11 +126,25 @@ function loadPracticeProgress() {
 // Get the practice lesson IDs.
 function getPracticeLessonIds() {
     return COURSE_ITEMS
-        .filter(item =>
-            item.key.startsWith('lesson-') &&
-            String(item.question || '').trim().length > 0 &&
-            parseOptions(item.options).length > 0
-        )
+        .filter(item => item.key.startsWith('lesson-'))
+        .filter(item => {
+            const task = getTaskFromLesson(item);
+            const hasQuestion = String(task.question || '').trim().length > 0;
+
+            if (task.type === 'text') {
+                return hasQuestion && (
+                    (Array.isArray(task.acceptedAnswers) && task.acceptedAnswers.length > 0) ||
+                    String(task.correctAnswer || '').trim().length > 0
+                );
+            }
+
+            if (task.type === 'ordering') {
+                const d = parseTaskData(item.task_data);
+                return hasQuestion && Array.isArray(d.correctOrder) && d.correctOrder.length > 0;
+            }
+
+            return hasQuestion && Array.isArray(task.options) && task.options.length > 0;
+        })
         .map(item => Number(item.lessonId || item.key.replace('lesson-', '')))
         .filter(id => !Number.isNaN(id));
 }
@@ -150,11 +169,8 @@ function buildCourseItems(modules, lessons) {
         label: lesson.title || 'Lesson',
         content: lesson.content || '<p>No lesson content available.</p>',
         module_id: lesson.module_id,
-        question: lesson.question,
-        options: lesson.options,
-        correctanswer: lesson.correctanswer,
-        correctfeedback: lesson.correctfeedback,
-        wrongfeedback: lesson.wrongfeedback
+        task_type: lesson.task_type,
+        task_data: lesson.task_data
     }));
 
     const summaryContent = lessonItems.length
@@ -162,17 +178,9 @@ function buildCourseItems(modules, lessons) {
         : '<p>No lessons available for this module yet.</p>';
 
     return [
-        {
-            key: 'course-intro',
-            label: 'Module overview',
-            content: introContent
-        },
+        { key: 'course-intro', label: 'Module overview', content: introContent },
         ...lessonItems,
-        {
-            key: 'course-summary',
-            label: 'Module summary',
-            content: summaryContent
-        }
+        { key: 'course-summary', label: 'Module summary', content: summaryContent }
     ];
 }
 
@@ -340,7 +348,8 @@ function renderCurrentItem(itemKey) {
 
     if (isLessonItem && lessonId > 0) {
         actionBtn.addEventListener('click', () => {
-            renderPractice(item, nextItemKey);
+            renderPractice(item, nextItemKey, item.task_type);
+            setSandboxExpanded(true);
         });
     } else if (hasNextItem) {
         actionBtn.addEventListener('click', () => setCurrentItem(nextItemKey));
@@ -356,13 +365,8 @@ function renderCurrentItem(itemKey) {
 function setCurrentItem(itemKey) {
     currentItemKey = itemKey;
 
-    if (itemKey.startsWith('lesson-')) {
-        const lessonId = Number(itemKey.replace('lesson-', ''));
-        if (!Number.isNaN(lessonId) && !completedLessonIds.has(lessonId)) {
-            completedLessonIds.add(lessonId);
-            saveLessonProgress(lessonId);
-        }
-    }
+    // Do not mark complete on open.
+    // Completion should happen after correct practice answer.
 
     renderNav(currentItemKey);
     renderCurrentItem(currentItemKey);
@@ -504,7 +508,9 @@ async function initLessonPage() {
         const lessonBodyEl = document.getElementById('lesson-body');
 
         if (lessonTitleEl) lessonTitleEl.textContent = 'Lesson unavailable';
-        if (lessonBodyEl) lessonBodyEl.innerHTML = '<p>Could not load lesson content from the database.</p>';
+        if (lessonBodyEl) {
+            lessonBodyEl.innerHTML = `<p>${error?.message || 'Could not load lesson content.'}</p>`;
+        }
     }
 
     initCoach();
@@ -530,73 +536,282 @@ function setSandboxExpanded(open) {
     layout.classList.toggle('sandbox-open', !!open);
 }
 
-function renderPractice(item, nextItemKey) {
+function normalizeTaskTypeValue(rawType) {
+    const t = String(rawType || '').trim().toLowerCase();
+    if (t === 'muli-select' || t === 'multi-select' || t === 'multiselect' || t === 'multi select') return 'multi_select';
+    if (t === 'password check' || t === 'password-check' || t === 'passwordcheck') return 'password_check';
+    return t || 'mcq';
+}
+
+function parseTaskData(raw) {
+    if (!raw) return {};
+    if (typeof raw === 'object') return raw;
+    if (typeof raw === 'string') {
+        try { return JSON.parse(raw); } catch { return {}; }
+    }
+    return {};
+}
+
+function getTaskFromLesson(item) {
+    const data = parseTaskData(item?.task_data);
+    const type = normalizeTaskTypeValue(item?.task_type || data.type || 'mcq');
+
+    return {
+        type,
+        question: data.question ?? data.prompt ?? '',
+        options: Array.isArray(data.options) ? data.options : parseOptions(data.options),
+        correctAnswer: data.correctAnswer ?? data.correctanswer ?? '',
+        acceptedAnswers: Array.isArray(data.acceptedAnswers) ? data.acceptedAnswers : null,
+        correctFeedback: data.correctFeedback ?? data.correctfeedback ?? 'Correct.',
+        wrongFeedback: data.wrongFeedback ?? data.wrongfeedback ?? 'Try again.'
+    };
+}
+
+function updateCoachFromPractice(isCorrect, task, lessonLabel) {
+    const output = document.getElementById('coach-response');
+    if (!output) return;
+    const msg = isCorrect
+        ? `Nice work on "${lessonLabel}". ${task.correctFeedback || 'Correct.'}`
+        : `Not quite for "${lessonLabel}". ${task.wrongFeedback || 'Try again.'}`;
+    typeText(output, msg);
+}
+
+function renderPractice(item, nextItemKey, taskTypeOverride = null) {
     const box = document.getElementById('practice-content');
     if (!box) return;
 
-    const lessonId = Number(item.lessonId || String(item.key || '').replace('lesson-', ''));
+    const task = getTaskFromLesson(item);
+    const data = parseTaskData(item.task_data);
+    const type = normalizeTaskTypeValue(taskTypeOverride || task.type || 'mcq');
+    const question = task.question || data.prompt || 'Practice task';
 
-    const q = item.question || '';
-    const options = parseOptions(item.options);
-    const correctAnswer = String(item.correctanswer ?? '').trim().toLowerCase();
-    const correctFeedback = item.correctfeedback || 'Correct.';
-    const wrongFeedback = item.wrongfeedback || 'Try again.';
+    const checkBtn = document.getElementById('btn-check-answer');
+    const nextBtn = document.getElementById('btn-next-task');
+    const retryBtn = document.getElementById('btn-try-again');
+    if (!checkBtn || !nextBtn || !retryBtn) return;
 
-    if (!q || options.length === 0) {
+    let selectedSingle = null;
+    let selectedMulti = new Set();
+    let orderItems = Array.isArray(data.items) ? [...data.items] : [...(task.options || [])];
+
+    // Normalize options so strings/objects both render correctly.
+    const rawOptions = Array.isArray(task.options) ? task.options : [];
+    const optionText = rawOptions.map((o) => {
+        if (typeof o === 'string') return o;
+        if (o && typeof o === 'object') return String(o.text ?? o.label ?? o.value ?? '');
+        return String(o ?? '');
+    });
+
+    // Support correctIndexes OR options[].isCorrect OR correctAnswers[]
+    const correctIdxFromData = Array.isArray(data.correctIndexes)
+        ? data.correctIndexes.map(Number).sort((a, b) => a - b)
+        : [];
+    const correctIdxFromOptions = rawOptions
+        .map((o, i) => (o && typeof o === 'object' && (o.isCorrect === true || o.correct === true) ? i : -1))
+        .filter(i => i >= 0)
+        .sort((a, b) => a - b);
+    const correctAnswersText = Array.isArray(data.correctAnswers)
+        ? data.correctAnswers.map(v => String(v).trim().toLowerCase()).sort()
+        : [];
+
+    const renderChoices = (options, multi = false) => {
         box.innerHTML = `
-            <p>No practice set for this lesson yet.</p>
-            <button type="button" class="lesson-action-btn" id="practice-next-btn">
-                ${nextItemKey ? 'Next part' : 'Finish'}
-            </button>
+            <p><strong>${question}</strong></p>
+            <div class="practice-options">
+                ${options.map((o, i) => `<button type="button" class="practice-option-btn" data-i="${i}" data-v="${String(o).replace(/"/g, '&quot;')}">${String.fromCharCode(65 + i)}. ${o}</button>`).join('')}
+            </div>
+            <p id="practice-feedback"></p>
         `;
-        const nextBtn = document.getElementById('practice-next-btn');
-        nextBtn?.addEventListener('click', () => {
-            if (nextItemKey) setCurrentItem(nextItemKey);
-        });
-        setSandboxExpanded(true);
-        return;
+        const btns = box.querySelectorAll('.practice-option-btn');
+        btns.forEach((b) => b.addEventListener('click', () => {
+            const idx = Number(b.dataset.i);
+            if (multi) {
+                if (selectedMulti.has(idx)) {
+                    selectedMulti.delete(idx);
+                    b.classList.remove('selected');
+                } else {
+                    selectedMulti.add(idx);
+                    b.classList.add('selected');
+                }
+            } else {
+                btns.forEach(x => x.classList.remove('selected'));
+                b.classList.add('selected');
+                selectedSingle = b.dataset.v || '';
+            }
+            console.log('[practice:click]', {
+                multi,
+                clickedIndex: idx,
+                selectedMulti: [...selectedMulti],
+                selectedSingle
+            });
+        }));
+    };
+
+    const renderOrdering = () => {
+        const draw = () => {
+            box.innerHTML = `
+                <p><strong>${question}</strong></p>
+                <div class="practice-options">
+                    ${orderItems.map((txt, i) => `
+                        <div class="ordering-item">
+                            <span>${i + 1}. ${txt}</span>
+                            <div>
+                                <button type="button" class="order-btn" data-dir="-1" data-i="${i}" ${i===0?'disabled':''}>↑</button>
+                                <button type="button" class="order-btn" data-dir="1" data-i="${i}" ${i===orderItems.length-1?'disabled':''}>↓</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                <p id="practice-feedback"></p>
+            `;
+            box.querySelectorAll('.order-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const i = Number(btn.dataset.i);
+                    const d = Number(btn.dataset.dir);
+                    const j = i + d;
+                    if (j < 0 || j >= orderItems.length) return;
+                    [orderItems[i], orderItems[j]] = [orderItems[j], orderItems[i]];
+                    draw();
+                });
+            });
+        };
+        draw();
+    };
+
+    switch (type) {
+        case 'multi_select':
+        case 'multi-select':
+        case 'muli-select':
+            renderChoices(optionText, true);
+            break;
+        case 'ordering':
+            renderOrdering();
+            break;
+        case 'scenario':
+            box.innerHTML = `
+                <p><strong>${question}</strong></p>
+                ${data.context ? `<div class="scenario-context"><p>${data.context}</p></div>` : ''}
+                <div class="practice-options">
+                    ${(task.options || []).map((o, i) => `<button type="button" class="practice-option-btn" data-v="${String(o).replace(/"/g, '&quot;')}">${String.fromCharCode(65+i)}. ${o}</button>`).join('')}
+                </div>
+                <p id="practice-feedback"></p>
+            `;
+            box.querySelectorAll('.practice-option-btn').forEach(b => {
+                b.addEventListener('click', () => {
+                    box.querySelectorAll('.practice-option-btn').forEach(x => x.classList.remove('selected'));
+                    b.classList.add('selected');
+                    selectedSingle = b.dataset.v || '';
+                });
+            });
+            break;
+        case 'password_check':
+            box.innerHTML = `
+                <p><strong>${question}</strong></p>
+                <input id="practice-password-answer" type="password" placeholder="Enter password" />
+                <p id="practice-feedback"></p>
+            `;
+            break;
+        case 'mcq':
+        default:
+            renderChoices(optionText, false);
+            break;
     }
 
-    box.innerHTML = `
-        <p><strong>${q}</strong></p>
-        <div class="practice-options">
-            ${options.map((opt, i) => `
-                <button type="button" class="practice-option-btn" data-opt="${String(opt).replace(/"/g, '&quot;')}">
-                    ${String.fromCharCode(65 + i)}. ${opt}
-                </button>
-            `).join('')}
-        </div>
-        <p id="practice-feedback"></p>
-        <button type="button" class="lesson-action-btn" id="practice-next-btn" disabled>
-            ${nextItemKey ? 'Next part' : 'Finish'}
-        </button>
-    `;
+    nextBtn.disabled = true;
 
-    const feedbackEl = document.getElementById('practice-feedback');
-    const nextBtn = document.getElementById('practice-next-btn');
+    const evaluate = () => {
+        const correct = String(task.correctAnswer || '').trim().toLowerCase();
 
-    box.querySelectorAll('.practice-option-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const picked = (btn.dataset.opt || '').trim().toLowerCase();
-            const ok = picked === correctAnswer;
+        if (type === 'password_check') {
+            const v = String(document.getElementById('practice-password-answer')?.value || '').trim().toLowerCase();
+            return v && v === correct;
+        }
 
-            feedbackEl.textContent = ok
-                ? correctFeedback
-                : `${wrongFeedback} You must answer correctly to continue.`;
-            feedbackEl.style.color = ok ? '#1b5e20' : '#b71c1c';
+        if (type === 'multi_select' || type === 'multi-select' || type === 'muli-select') {
+            const pickedIdx = [...selectedMulti].map(Number).sort((a, b) => a - b);
 
-            nextBtn.disabled = !ok;
+            // fallback sources
+            const idxFromData = Array.isArray(data.correctIndexes) ? data.correctIndexes : [];
+            const idxFromAlt = Array.isArray(data.correct_indices) ? data.correct_indices : [];
+            const idxFromAnswer = String(data.correctAnswer || data.correctanswer || task.correctAnswer || '')
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .map(v => Number(v))
+                .filter(n => Number.isFinite(n));
 
-            if (ok && !Number.isNaN(lessonId)) {
-                passedPracticeLessonIds.add(lessonId);
-                savePracticeProgress();
+            // include options[].correct / options[].isCorrect
+            const idxFromOptions = rawOptions
+                .map((o, i) => (o && typeof o === 'object' && (o.isCorrect === true || o.correct === true) ? i : -1))
+                .filter(i => i >= 0);
+
+            let expectedIdx = [...idxFromData, ...idxFromAlt, ...idxFromAnswer, ...idxFromOptions]
+                .map(Number)
+                .filter(Number.isFinite)
+                .sort((a, b) => a - b);
+
+            // convert 1-based to 0-based if needed
+            if (expectedIdx.length > 0 && expectedIdx.every(n => n >= 1) && Math.max(...expectedIdx) <= optionText.length) {
+                expectedIdx = expectedIdx.map(n => n - 1);
             }
-        });
-    });
 
-    nextBtn?.addEventListener('click', () => {
+            if (expectedIdx.length > 0) {
+                return JSON.stringify(expectedIdx) === JSON.stringify(pickedIdx);
+            }
+
+            // text-based fallback
+            const expectedText = (
+                Array.isArray(data.correctAnswers) ? data.correctAnswers : String(task.correctAnswer || '').split(',')
+            )
+                .map(v => String(v).trim().toLowerCase())
+                .filter(Boolean)
+                .sort();
+
+            if (expectedText.length > 0) {
+                const pickedText = pickedIdx
+                    .map(i => String(optionText[i] || '').trim().toLowerCase())
+                    .sort();
+                return JSON.stringify(expectedText) === JSON.stringify(pickedText);
+            }
+
+            return false;
+        }
+
+        if (type === 'ordering') {
+            const expected = Array.isArray(data.correctOrder) ? data.correctOrder.map(String) : [];
+            return expected.length > 0 && JSON.stringify(orderItems.map(String)) === JSON.stringify(expected);
+        }
+
+        return String(selectedSingle || '').trim().toLowerCase() === correct;
+    };
+
+    checkBtn.onclick = () => {
+        const ok = evaluate();
+        const feedbackEl = document.getElementById('practice-feedback');
+        if (!feedbackEl) return;
+
+        feedbackEl.textContent = ok
+            ? (task.correctFeedback || 'Correct.')
+            : `${task.wrongFeedback || 'Try again.'} You must answer correctly to continue.`;
+        feedbackEl.style.color = ok ? '#1b5e20' : '#b71c1c';
+
+        nextBtn.disabled = !ok;
+        updateCoachFromPractice(ok, task, item.label || 'lesson');
+
+        if (ok) {
+            const lessonId = Number(item.lessonId || String(item.key || '').replace('lesson-', ''));
+            if (!Number.isNaN(lessonId)) {
+                passedPracticeLessonIds.add(lessonId);
+                completedLessonIds.add(lessonId);
+                savePracticeProgress();
+                saveLessonProgress(lessonId);
+                renderNav(currentItemKey);
+            }
+        }
+    };
+
+    retryBtn.onclick = () => renderPractice(item, nextItemKey, type);
+    nextBtn.onclick = () => {
         if (nextItemKey) setCurrentItem(nextItemKey);
-    });
-
-    setSandboxExpanded(true);
+    };
 }

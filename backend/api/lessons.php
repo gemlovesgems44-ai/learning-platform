@@ -1,108 +1,106 @@
 <?php
 // filepath: /Users/jemimansandax/Desktop/synoptic project/learning-platform/backend/api/lessons.php
-require_once '../config/database.php';
+require_once __DIR__ . '/../config/database.php';
 
-header("Content-Type: application/json; charset=UTF-8");
+// Normalize DB handle from common patterns.
+if (!isset($db)) {
+    if (isset($pdo) && $pdo instanceof PDO) {
+        $db = $pdo;
+    } elseif (isset($conn) && $conn instanceof PDO) {
+        $db = $conn;
+    } elseif (function_exists('getDbConnection')) {
+        $tmp = getDbConnection();
+        if ($tmp instanceof PDO) $db = $tmp;
+    } elseif (function_exists('getConnection')) {
+        $tmp = getConnection();
+        if ($tmp instanceof PDO) $db = $tmp;
+    } elseif (class_exists('Database')) {
+        $database = new Database();
+        if (method_exists($database, 'getConnection')) {
+            $tmp = $database->getConnection();
+            if ($tmp instanceof PDO) $db = $tmp;
+        } elseif (method_exists($database, 'connect')) {
+            $tmp = $database->connect();
+            if ($tmp instanceof PDO) $db = $tmp;
+        }
+    }
+}
 
-// Create database connection.
-$database = new Database();
-$db = $database->getConnection();
-
-// Stop early if database connection failed.
-if ($db === null) {
+if (!isset($db) || !($db instanceof PDO)) {
     http_response_code(500);
-    echo json_encode(["message" => "Database connection failed"]);
+    header('Content-Type: application/json');
+    echo json_encode(['message' => 'Database connection not initialized']);
     exit;
 }
 
-// Helper: check whether a table contains a given column.
-// Used so this API can support slightly different database schemas.
-function hasColumn(PDO $db, string $table, string $column): bool {
-    $sql = "SELECT COUNT(*) 
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-              AND TABLE_NAME = :table
-              AND COLUMN_NAME = :column";
-    $stmt = $db->prepare($sql);
-    $stmt->execute([
-        ':table' => $table,
-        ':column' => $column
-    ]);
-    return (int)$stmt->fetchColumn() > 0;
-}
-
-// Only allow GET requests for reading lesson data.
-if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-    http_response_code(405);
-    echo json_encode(["message" => "Method not allowed"]);
-    exit;
-}
-
-// Read optional query parameters from the URL.
-// $courseId = isset($_GET['courseId']) ? (int)$_GET['courseId'] : 0;
-$moduleId = isset($_GET['moduleId']) ? (int)$_GET['moduleId'] : 0;
+header('Content-Type: application/json');
 
 try {
-    // If a specific module ID is provided, return only lessons for that module.
-    if ($moduleId > 0) {
-        $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at,
-               l.question, l.options, l.correctanswer, l.correctfeedback, l.wrongfeedback
-        FROM lessons l
-        WHERE l.module_id = :moduleId
-        ORDER BY l.id ASC";
-        $stmt = $db->prepare($sql);
-        $stmt->execute([':moduleId' => $moduleId]);
-
-    // Otherwise, if a course ID is provided, try to return lessons for that course.
-    // } elseif ($courseId > 0) {
-
-    //     // Preferred schema: modules table contains course_id.
-    //     if (hasColumn($db, 'modules', 'course_id')) {
-    //         $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at
-    //                 FROM lessons l
-    //                 INNER JOIN modules m ON m.id = l.module_id
-    //                 WHERE m.course_id = :courseId
-    //                 ORDER BY m.id ASC, l.id ASC";
-    //         $stmt = $db->prepare($sql);
-    //         $stmt->execute([':courseId' => $courseId]);
-
-        // // Alternative schema: lessons table contains course_id directly.
-        // } elseif (hasColumn($db, 'lessons', 'course_id')) {
-        //     $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at
-        //             FROM lessons l
-        //             WHERE l.course_id = :courseId
-        //             ORDER BY l.id ASC";
-        //     $stmt = $db->prepare($sql);
-        //     $stmt->execute([':courseId' => $courseId]);
-
-        // // Fallback for current schema: return all lessons instead of failing.
-        // } else {
-        //     $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at
-        //             FROM lessons l
-        //             ORDER BY l.id ASC";
-        //     $stmt = $db->prepare($sql);
-        //     $stmt->execute();
-        // }
-
-    // If no filters are provided, return all lessons.
-    } else {
-        $sql = "SELECT l.id, l.module_id, l.title, l.content, l.created_at,
-               l.question, l.options, l.correctanswer, l.correctfeedback, l.wrongfeedback
-        FROM lessons l
-        ORDER BY l.id ASC";
-        $stmt = $db->prepare($sql);
-        $stmt->execute();
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+        http_response_code(405);
+        echo json_encode(['message' => 'Method not allowed']);
+        exit;
     }
 
-    // Send lesson data back as JSON.
-    echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+    $moduleId = isset($_GET['moduleId']) ? (int)$_GET['moduleId'] : 0;
+    
+    if ($moduleId <= 0) {
+        http_response_code(400);
+        echo json_encode(['message' => 'Valid moduleId is required']);
+        exit;
+    }
 
+    // Detect table name: lessons or lesson
+    $table = null;
+    foreach (['lessons', 'lesson'] as $candidate) {
+        $t = $db->prepare("SHOW TABLES LIKE :t");
+        $t->execute([':t' => $candidate]);
+        if ($t->fetch()) { $table = $candidate; break; }
+    }
+
+    if (!$table) {
+        throw new RuntimeException('Neither "lessons" nor "lesson" table exists.');
+    }
+
+    // Detect available columns
+    $cstmt = $db->query("SHOW COLUMNS FROM `{$table}`");
+    $cols = $cstmt->fetchAll(PDO::FETCH_COLUMN, 0);
+    $colSet = array_flip($cols);
+
+    $wanted = [
+        'id',
+        'module_id',
+        'title',
+        'content',
+        'task_type',
+        'task_data',
+        'order_index',
+        'created_at'
+    ];
+
+    $selectCols = array_values(array_filter($wanted, fn($c) => isset($colSet[$c])));
+    if (empty($selectCols)) {
+        throw new RuntimeException("No expected columns found in {$table}.");
+    }
+
+    $selectSql = implode(",\n                ", array_map(fn($c) => "l.`{$c}`", $selectCols));
+    $orderSql = isset($colSet['order_index']) ? "COALESCE(l.`order_index`, l.`id`) ASC" : "l.`id` ASC";
+
+    $sql = "SELECT 
+                {$selectSql}
+            FROM `{$table}` l
+            WHERE l.`module_id` = :moduleId
+            ORDER BY {$orderSql}";
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute([':moduleId' => $moduleId]);
+    $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    echo json_encode($lessons);
 } catch (Throwable $e) {
-    // Return a server error if the query fails.
     http_response_code(500);
     echo json_encode([
-        "message" => "Database error",
-        "error" => $e->getMessage()
+        'message' => 'Failed to load lessons',
+        'error' => $e->getMessage()
     ]);
 }
-?>

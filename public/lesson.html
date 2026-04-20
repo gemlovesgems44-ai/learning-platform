@@ -34,14 +34,21 @@
             <div id="lesson-body">Select a module from the left.</div>
         </section>
 
-        <!-- NEW: right-side practice sandbox -->
         <aside class="practice-sandbox" id="practice-sandbox" aria-label="Practice sandbox">
-            <h3>Practice</h3>
-            <div id="practice-content">
-                <p>Finish a lesson section, then click <strong>Open practice</strong>.</p>
-            </div>
+            <section class="practice-area" id="practice-area" aria-label="Practice controls">
+                <h4>Practice Area</h4>
+                <div id="practice-content">
+                    <p>Select a lesson to begin practice.</p>
+                </div>
+                <div class="practice-actions">
+                    <button type="button" id="btn-check-answer" class="lesson-action-btn">Check answer</button>
+                    <button type="button" id="btn-next-task" class="lesson-action-btn" disabled>Next task</button>
+                    <button type="button" id="btn-try-again" class="lesson-action-btn">Try again</button>
+                </div>
+            </section>
         </aside>
     </main>
+
 
     <section class="coach-panel">
         <h3>Coach</h3>
