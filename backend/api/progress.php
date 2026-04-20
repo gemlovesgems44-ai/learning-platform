@@ -1,127 +1,114 @@
 <?php
 // filepath: /Users/jemimansandax/Desktop/synoptic project/learning-platform/backend/api/progress.php
-require_once '../config/database.php';
+require_once __DIR__ . '/../config/database.php';
 
-header("Content-Type: application/json; charset=UTF-8");
-
-$database = new Database();
-$db = $database->getConnection();
-
-if ($db === null) {
-    http_response_code(500);
-    echo json_encode(["message" => "Database connection failed"]);
-    exit;
-}
-
-function hasColumn(PDO $db, string $table, string $column): bool {
-    $sql = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column";
-    $stmt = $db->prepare($sql);
-    $stmt->execute([':table' => $table, ':column' => $column]);
-    return (int)$stmt->fetchColumn() > 0;
-}
+header('Content-Type: application/json');
 
 try {
-    $hasCompleted   = hasColumn($db, 'progress', 'completed');
-    $hasCompletedAt = hasColumn($db, 'progress', 'completed_at');
-    $hasCreatedAt   = hasColumn($db, 'progress', 'created_at');
+    // Resolve PDO from common config patterns
+    $db = $db ?? null;
 
-    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $userId = $_GET['userId'] ?? null;
-        if (!$userId) {
-            http_response_code(400);
-            echo json_encode(["message" => "User ID required"]);
-            exit;
+    if (!($db instanceof PDO)) {
+        if (isset($pdo) && $pdo instanceof PDO) $db = $pdo;
+        elseif (isset($conn) && $conn instanceof PDO) $db = $conn;
+        elseif (isset($database) && $database instanceof PDO) $db = $database;
+        elseif (function_exists('getDbConnection')) {
+            $tmp = getDbConnection();
+            if ($tmp instanceof PDO) $db = $tmp;
+        } elseif (function_exists('getConnection')) {
+            $tmp = getConnection();
+            if ($tmp instanceof PDO) $db = $tmp;
+        } elseif (class_exists('Database')) {
+            $instance = new Database();
+            if (method_exists($instance, 'getConnection')) {
+                $tmp = $instance->getConnection();
+                if ($tmp instanceof PDO) $db = $tmp;
+            } elseif (method_exists($instance, 'connect')) {
+                $tmp = $instance->connect();
+                if ($tmp instanceof PDO) $db = $tmp;
+            }
         }
+    }
 
-        $dateExpr = $hasCompletedAt
-            ? "p.completed_at"
-            : ($hasCreatedAt ? "p.created_at" : "NULL");
+    if (!($db instanceof PDO)) {
+        throw new RuntimeException('Database connection not initialized');
+    }
 
-        $where = "p.user_id = :userId";
-        if ($hasCompleted) {
-            $where .= " AND p.completed = 1";
-        }
-
-        $query = "SELECT p.id, COALESCE(l.title, 'Lesson') AS lessonTitle, {$dateExpr} AS completed_at
-                  FROM progress p
-                  LEFT JOIN lessons l ON p.lesson_id = l.id
-                  WHERE {$where}
-                  ORDER BY " . ($hasCompletedAt ? "p.completed_at" : "p.id") . " DESC";
-
-        $stmt = $db->prepare($query);
-        $stmt->bindParam(':userId', $userId, PDO::PARAM_INT);
-        $stmt->execute();
-
-        $progress = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        http_response_code(200);
-        echo json_encode($progress ?: []);
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+        http_response_code(405);
+        echo json_encode(['message' => 'Method not allowed']);
         exit;
     }
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $data = json_decode(file_get_contents("php://input"));
-
-        if (!isset($data->userId) || !isset($data->lessonId)) {
-            http_response_code(400);
-            echo json_encode(["message" => "User ID and Lesson ID required"]);
-            exit;
-        }
-
-        $userId = (int)$data->userId;
-        $lessonId = (int)$data->lessonId;
-
-        if ($userId <= 0 || $lessonId <= 0) {
-            http_response_code(400);
-            echo json_encode(["message" => "Valid userId and lessonId required"]);
-            exit;
-        }
-
-        $checkSql = "SELECT id FROM progress WHERE user_id = :userId AND lesson_id = :lessonId LIMIT 1";
-        $checkStmt = $db->prepare($checkSql);
-        $checkStmt->execute([
-            ':userId' => $userId,
-            ':lessonId' => $lessonId
-        ]);
-
-        if ($checkStmt->fetch(PDO::FETCH_ASSOC)) {
-            http_response_code(200);
-            echo json_encode(["message" => "Progress already saved"]);
-            exit;
-        }
-
-        $columns = ["user_id", "lesson_id"];
-        $values  = [":userId", ":lessonId"];
-        $params  = [
-            ':userId' => $userId,
-            ':lessonId' => $lessonId
-        ];
-
-        if ($hasCompleted) {
-            $columns[] = "completed";
-            $values[]  = ":completed";
-            $params[':completed'] = 1;
-        }
-        if ($hasCompletedAt) {
-            $columns[] = "completed_at";
-            $values[]  = "NOW()";
-        }
-
-        $sql = "INSERT INTO progress (" . implode(", ", $columns) . ")
-                VALUES (" . implode(", ", $values) . ")";
-
-        $stmt = $db->prepare($sql);
-        $stmt->execute($params);
-
-        http_response_code(201);
-        echo json_encode(["message" => "Progress saved"]);
+    $userId = isset($_GET['userId']) ? (int)$_GET['userId'] : 0;
+    if ($userId <= 0) {
+        http_response_code(400);
+        echo json_encode(['message' => 'Valid userId is required']);
         exit;
     }
 
-    http_response_code(405);
-    echo json_encode(["message" => "Method not allowed"]);
+    // Detect lessons table
+    $lessonTable = null;
+    foreach (['lessons', 'lesson'] as $t) {
+        $s = $db->prepare("SHOW TABLES LIKE :t");
+        $s->execute([':t' => $t]);
+        if ($s->fetch()) { $lessonTable = $t; break; }
+    }
+    if (!$lessonTable) {
+        throw new RuntimeException('No lessons table found');
+    }
+
+    // Detect progress table
+    $progressTable = null;
+    foreach (['lesson_progress', 'progress', 'user_progress'] as $t) {
+        $s = $db->prepare("SHOW TABLES LIKE :t");
+        $s->execute([':t' => $t]);
+        if ($s->fetch()) { $progressTable = $t; break; }
+    }
+    if (!$progressTable) {
+        throw new RuntimeException('No progress table found');
+    }
+
+    $cols = $db->query("SHOW COLUMNS FROM `{$progressTable}`")->fetchAll(PDO::FETCH_COLUMN, 0);
+    $colSet = array_flip($cols);
+
+    $userCol      = isset($colSet['user_id']) ? 'user_id' : (isset($colSet['userid']) ? 'userid' : null);
+    $lessonCol    = isset($colSet['lesson_id']) ? 'lesson_id' : (isset($colSet['lessonid']) ? 'lessonid' : null);
+    $completedAt  = isset($colSet['completed_at']) ? 'completed_at' : (isset($colSet['updated_at']) ? 'updated_at' : null);
+    $wrongCol     = isset($colSet['wrong_attempts']) ? 'wrong_attempts' : (isset($colSet['mistakes']) ? 'mistakes' : null);
+    $accuracyCol  = isset($colSet['accuracy']) ? 'accuracy' : (isset($colSet['score']) ? 'score' : null);
+    $completedCol = isset($colSet['completed']) ? 'completed' : null;
+
+    if (!$userCol || !$lessonCol) {
+        throw new RuntimeException("Progress table '{$progressTable}' missing user/lesson columns");
+    }
+
+    $whereCompleted = $completedCol ? " AND COALESCE(p.`{$completedCol}`, 0) = 1" : "";
+
+    $sql = "
+        SELECT
+            l.`module_id` AS module_id,
+            l.`title` AS lesson_title,
+            " . ($completedAt ? "p.`{$completedAt}`" : "NULL") . " AS completed_at,
+            " . ($wrongCol ? "COALESCE(p.`{$wrongCol}`, 0)" : "0") . " AS wrong_attempts,
+            " . ($accuracyCol ? "p.`{$accuracyCol}`" : "NULL") . " AS accuracy
+        FROM `{$progressTable}` p
+        INNER JOIN `{$lessonTable}` l
+            ON l.`id` = p.`{$lessonCol}`
+        WHERE p.`{$userCol}` = :userId
+        {$whereCompleted}
+        ORDER BY " . ($completedAt ? "p.`{$completedAt}` DESC" : "l.`id` DESC") . "
+    ";
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute([':userId' => $userId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    echo json_encode($rows);
 } catch (Throwable $e) {
     http_response_code(500);
-    echo json_encode(["message" => "Database error: " . $e->getMessage()]);
+    echo json_encode([
+        'message' => 'Failed to load progress',
+        'error' => $e->getMessage()
+    ]);
 }
-?>

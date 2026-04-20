@@ -14,7 +14,12 @@ let completedLessonIds = new Set();
 let passedPracticeLessonIds = new Set();
 
 // Stores coach interaction state.
-const coachState = { stuckCount: 0, lastAction: null };
+const coachState = {
+    stuckCount: 0,
+    lastAction: null,
+    wrongAttemptsByLesson: Object.create(null),
+    lastMessage: ''
+};
 
 // Rule-based coach responses.
 const TOPIC_RULES = {
@@ -393,85 +398,121 @@ function firstKeyPoint(ctx) {
 }
 
 function buildCoachResponse(action) {
+    const ctx = getLessonContext() || { title: 'this topic', explanation: '', keyPoints: [] };
+    const firstPoint = ctx.keyPoints[0] || ctx.explanation || 'the core concept';
+    const secondPoint = ctx.keyPoints[1] || 'the next key idea';
+    const attempts = getWrongAttemptsCurrentLesson();
+
+    coachState.lastAction = action;
     if (action === 'stuck') coachState.stuckCount += 1;
     else coachState.stuckCount = 0;
 
-    coachState.lastAction = action;
-
-    const ctx = getLessonContext() || { title: 'this topic', explanation: '', keyPoints: [] };
-    const kp = firstKeyPoint(ctx);
-
     if (action === 'explain') {
-        return kp
-            ? `In "${ctx.title}", the main idea is: ${kp}. Focus on that first.`
-            : `In "${ctx.title}", start with this core idea: ${ctx.explanation || 'read the first section and summarize it in one sentence.'}`;
+        if (attempts >= 2) {
+            return `Simple version for "${ctx.title}": focus only on "${firstPoint}". Ignore extra detail until that is clear.`;
+        }
+        return `Simple version for "${ctx.title}": ${firstPoint}.`;
     }
 
     if (action === 'example') {
-        return kp
-            ? `Example for "${ctx.title}": Try this: use "${kp}" in a simple real-life situation you know, then note one outcome.`
-            : `Example for "${ctx.title}": pick one concept and show how you would use it in practice.`;
+        if (attempts >= 2) {
+            return `Worked example: apply "${firstPoint}" first, then check it against "${secondPoint}".`;
+        }
+        return `Example: use "${firstPoint}" in one real scenario, then write one short outcome.`;
     }
 
     if (action === 'next') {
-        const base = (ctx.keyPoints.length >= 2)
-            ? `Next: complete one task for "${ctx.keyPoints[0]}", then move to "${ctx.keyPoints[1]}".`
-            : `Next: finish this section of "${ctx.title}" and complete one quick practice step.`;
-        return addEncouragement(base);
+        return getNextSuggestedStep();
     }
 
     // stuck
-    let msg = kp
-        ? `If stuck on "${ctx.title}", isolate this point: "${kp}", and try only that step first.`
-        : `If stuck on "${ctx.title}", break it into one tiny step and retry.`;
-
-    if (coachState.stuckCount === 2) {
-        msg += ' Let’s slow down. Do only the first step.';
-    } else if (coachState.stuckCount >= 3) {
-        msg += ' It’s okay. Go back to the start and try again slowly.';
+    if (coachState.stuckCount >= 3 || attempts >= 3) {
+        return `You’re stuck on "${ctx.title}". Reset: 1) reread the question, 2) eliminate clearly wrong options, 3) choose the best remaining answer.`;
     }
 
-    return msg;
+    return `If stuck on "${ctx.title}", do one small step: start with "${firstPoint}", then retry.`;
 }
 
-function addEncouragement(text) {
-    const phrases = [
-        "You're doing well.",
-        "Keep going.",
-        "You're on the right track.",
-        "Nice work so far."
-    ];
-    const random = phrases[Math.floor(Math.random() * phrases.length)];
-    return `${random} ${text}`;
-}
+function renderCoachActions() {
+    const buttons = [...document.querySelectorAll('.coach-btn')];
+    if (!buttons.length) return;
 
-// DELETE this invalid top-level line:
-// return addEncouragement(`Next: complete one task for "${ctx.keyPoints[0]}"`);
+    const attempts = getWrongAttemptsCurrentLesson();
+    const ctx = getLessonContext() || { title: 'this topic', keyPoints: [] };
+    const shortPoint = (ctx.keyPoints[0] || 'core idea').slice(0, 28);
+
+    const labels = {
+        explain: attempts >= 2 ? `Simplify "${ctx.title}"` : `Explain simply`,
+        example: attempts >= 2 ? `Show worked example` : `Give example`,
+        next: 'What should I do next?',
+        stuck: attempts >= 2 ? `I’m still stuck` : `I’m stuck`
+    };
+
+    buttons.forEach((btn) => {
+        const action = btn.dataset.action;
+        if (!action || !labels[action]) return;
+        btn.textContent = labels[action];
+        btn.title = `Help for: ${shortPoint}`;
+    });
+}
 
 // Wire up the coach buttons.
 function initCoach() {
     const output = document.getElementById('coach-response');
     if (!output) return;
 
+    renderCoachActions();
+
     document.querySelectorAll('.coach-btn').forEach((btn) => {
+        if (btn.dataset.bound === '1') return;
+        btn.dataset.bound = '1';
+
         btn.addEventListener('click', () => {
-            const action = btn.dataset.action;
+            const action = btn.dataset.action || 'explain';
             typeText(output, buildCoachResponse(action));
+            renderCoachActions();
         });
     });
 }
 
-// Add missing typing effect function (used by initCoach).
-function typeText(element, text, speed = 16) {
-    if (!element) return;
-    element.textContent = '';
+// Cancelable coach typing controller
+const coachTypingController = {
+    runId: 0,
+    timer: null
+};
 
+function cancelCoachTyping() {
+    coachTypingController.runId += 1;
+    if (coachTypingController.timer) {
+        clearTimeout(coachTypingController.timer);
+        coachTypingController.timer = null;
+    }
+}
+
+// Replace your current typeText(...) with this version
+function typeText(el, text, speed = 18) {
+    if (!el) return;
+
+    cancelCoachTyping();
+    const myRunId = coachTypingController.runId;
+    const full = String(text ?? '');
     let i = 0;
-    const timer = setInterval(() => {
-        element.textContent += text.charAt(i);
-        i += 1;
-        if (i >= text.length) clearInterval(timer);
-    }, speed);
+
+    el.textContent = '';
+
+    const step = () => {
+        if (myRunId !== coachTypingController.runId) return; // canceled by newer request
+
+        if (i >= full.length) {
+            coachTypingController.timer = null;
+            return;
+        }
+
+        el.textContent += full.charAt(i++);
+        coachTypingController.timer = setTimeout(step, speed);
+    };
+
+    step();
 }
 
 // Main page setup.
@@ -570,10 +611,25 @@ function getTaskFromLesson(item) {
 function updateCoachFromPractice(isCorrect, task, lessonLabel) {
     const output = document.getElementById('coach-response');
     if (!output) return;
+
+    const lessonKey = getCurrentLessonKey();
+    if (lessonKey) {
+        if (isCorrect) coachState.wrongAttemptsByLesson[lessonKey] = 0;
+        else coachState.wrongAttemptsByLesson[lessonKey] = (coachState.wrongAttemptsByLesson[lessonKey] || 0) + 1;
+    }
+
+    const attempts = getWrongAttemptsCurrentLesson();
+
     const msg = isCorrect
-        ? `Nice work on "${lessonLabel}". ${task.correctFeedback || 'Correct.'}`
-        : `Not quite for "${lessonLabel}". ${task.wrongFeedback || 'Try again.'}`;
+        ? `Nice work on "${lessonLabel}". ${task.correctFeedback || 'Correct.'} ${getNextSuggestedStep()}`
+        : attempts >= 3
+            ? `${task.wrongFeedback || 'Try again.'} Let’s reset: remove wrong options first, then pick the strongest remaining answer.`
+            : attempts === 2
+                ? `${task.wrongFeedback || 'Try again.'} Hint: focus on key terms from this lesson and eliminate distractors.`
+                : `Not quite for "${lessonLabel}". ${task.wrongFeedback || 'Try again.'}`;
+
     typeText(output, msg);
+    renderCoachActions();
 }
 
 function renderPractice(item, nextItemKey, taskTypeOverride = null) {
@@ -638,12 +694,6 @@ function renderPractice(item, nextItemKey, taskTypeOverride = null) {
                 b.classList.add('selected');
                 selectedSingle = b.dataset.v || '';
             }
-            console.log('[practice:click]', {
-                multi,
-                clickedIndex: idx,
-                selectedMulti: [...selectedMulti],
-                selectedSingle
-            });
         }));
     };
 
@@ -814,4 +864,35 @@ function renderPractice(item, nextItemKey, taskTypeOverride = null) {
     nextBtn.onclick = () => {
         if (nextItemKey) setCurrentItem(nextItemKey);
     };
+}
+
+function getCurrentLessonKey() {
+    return typeof currentItemKey === 'string' && currentItemKey.startsWith('lesson-')
+        ? currentItemKey
+        : null;
+}
+
+function getWrongAttemptsCurrentLesson() {
+    const key = getCurrentLessonKey();
+    return key ? (coachState.wrongAttemptsByLesson[key] || 0) : 0;
+}
+
+function getNextSuggestedStep() {
+    const current = getCurrentItem();
+
+    if (current?.key?.startsWith('lesson-')) {
+        const lessonId = Number(current.lessonId || String(current.key).replace('lesson-', ''));
+        if (!Number.isNaN(lessonId) && !passedPracticeLessonIds.has(lessonId)) {
+            return `Complete practice for "${current.label}" to unlock progress.`;
+        }
+    }
+
+    const nextUnpassed = COURSE_ITEMS.find((item) => {
+        if (!item.key.startsWith('lesson-')) return false;
+        const id = Number(item.lessonId || String(item.key).replace('lesson-', ''));
+        return !Number.isNaN(id) && !passedPracticeLessonIds.has(id);
+    });
+
+    if (nextUnpassed) return `Go to "${nextUnpassed.label}" and complete its practice task.`;
+    return 'Open Module summary, then mark the module as done.';
 }
