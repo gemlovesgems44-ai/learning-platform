@@ -4,31 +4,11 @@ require_once __DIR__ . '/../config/database.php';
 
 header("Content-Type: application/json; charset=UTF-8");
 
-// DEBUG: find what database.php exports
-$_availableGlobals = [];
-foreach (['conn', 'pdo', 'db', 'mysqli', 'database', 'connection'] as $k) {
-    if (isset($GLOBALS[$k])) {
-        $_availableGlobals[$k] = get_class($GLOBALS[$k]);
-    }
-}
-error_log('DB globals available: ' . json_encode($_availableGlobals));
-
-// Also check for class
-if (class_exists('Database')) {
-    error_log('Database class exists');
-    $obj = new Database();
-    $methods = get_class_methods($obj);
-    error_log('Database methods: ' . json_encode($methods));
-}
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+if (!in_array($_SERVER['REQUEST_METHOD'], ['GET', 'POST'], true)) {
     http_response_code(405);
     echo json_encode(["message" => "Method not allowed"]);
     exit;
 }
-
-$data = json_decode(file_get_contents("php://input"), true);
-if (!is_array($data)) $data = [];
 
 function resolveDb() {
     foreach (['conn', 'pdo', 'db', 'mysqli', 'database', 'connection'] as $k) {
@@ -53,122 +33,182 @@ if (!$isPdo && !$isMysqli) {
     exit;
 }
 
+// GET branch can now safely use $database / $isPdo
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $userId = (int)($_GET['userId'] ?? 0);
+    if ($userId <= 0) {
+        http_response_code(400);
+        echo json_encode(["message" => "Missing userId"]);
+        exit;
+    }
+
+    try {
+        if ($isPdo) {
+            $stmt = $database->prepare("
+                SELECT 
+                    p.id,
+                    p.user_id,
+                    p.lesson_id,
+                    p.status,
+                    p.completed,
+                    COALESCE(p.attempts, 0) AS attempts,
+                    COALESCE(p.correct_attempts, 0) AS correct_attempts,
+                    COALESCE(p.last_score, 0) AS last_score,
+                    COALESCE(p.first_attempt_correct, 0) AS first_attempt_correct,
+                    p.confidence_before,
+                    p.confidence_after,
+                    p.completed_at,
+                    p.last_attempt_at,
+                    l.title AS lesson_title,
+                    l.module_id,
+                    m.title AS module_title
+                FROM progress p
+                LEFT JOIN lessons l ON l.id = p.lesson_id
+                LEFT JOIN modules m ON m.id = l.module_id
+                WHERE p.user_id = :userId
+                ORDER BY m.id, l.id
+            ");
+            $stmt->execute([':userId' => $userId]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $completedLessons = (int)$database->query("
+                SELECT COUNT(*) FROM progress 
+                WHERE user_id = {$userId} AND completed = 1
+            ")->fetchColumn();
+
+            $practiceRate = (float)$database->query("
+                SELECT COALESCE(ROUND((SUM(correct_attempts) * 100.0) / NULLIF(SUM(attempts), 0), 2), 0)
+                FROM progress
+                WHERE user_id = {$userId} AND attempts > 0
+            ")->fetchColumn();
+
+            $avgConfidenceImprovement = (float)$database->query("
+                SELECT COALESCE(ROUND(AVG(confidence_after - confidence_before), 2), 0)
+                FROM progress
+                WHERE user_id = {$userId}
+                  AND confidence_before IS NOT NULL
+                  AND confidence_after IS NOT NULL
+            ")->fetchColumn();
+        } else {
+            $rows = [];
+            $q = $database->query("
+                SELECT 
+                    p.id, p.user_id, p.lesson_id, p.status, p.completed,
+                    COALESCE(p.attempts, 0) AS attempts,
+                    COALESCE(p.correct_attempts, 0) AS correct_attempts,
+                    COALESCE(p.last_score, 0) AS last_score,
+                    COALESCE(p.first_attempt_correct, 0) AS first_attempt_correct,
+                    p.confidence_before, p.confidence_after,
+                    p.completed_at, p.last_attempt_at,
+                    l.title AS lesson_title, l.module_id, m.title AS module_title
+                FROM progress p
+                LEFT JOIN lessons l ON l.id = p.lesson_id
+                LEFT JOIN modules m ON m.id = l.module_id
+                WHERE p.user_id = {$userId}
+                ORDER BY m.id, l.id
+            ");
+            while ($q && $r = $q->fetch_assoc()) $rows[] = $r;
+
+            $completedLessons = 0;
+            $r1 = $database->query("SELECT COUNT(*) c FROM progress WHERE user_id = {$userId} AND completed = 1");
+            if ($r1 && ($x = $r1->fetch_assoc())) $completedLessons = (int)$x['c'];
+
+            $practiceRate = 0.0;
+            $r2 = $database->query("
+                SELECT COALESCE(ROUND((SUM(correct_attempts) * 100.0) / NULLIF(SUM(attempts), 0), 2), 0) v
+                FROM progress
+                WHERE user_id = {$userId} AND attempts > 0
+            ");
+            if ($r2 && ($x = $r2->fetch_assoc())) $practiceRate = (float)$x['v'];
+
+            $avgConfidenceImprovement = 0.0;
+            $r3 = $database->query("
+                SELECT COALESCE(ROUND(AVG(confidence_after - confidence_before), 2), 0) v
+                FROM progress
+                WHERE user_id = {$userId}
+                  AND confidence_before IS NOT NULL
+                  AND confidence_after IS NOT NULL
+            ");
+            if ($r3 && ($x = $r3->fetch_assoc())) $avgConfidenceImprovement = (float)$x['v'];
+        }
+
+        echo json_encode([
+            "userId" => $userId,
+            "progress" => $rows,
+            "overview" => [
+                "completedLessons" => $completedLessons,
+                "practiceSuccessRate" => $practiceRate,
+                "averageConfidenceImprovement" => $avgConfidenceImprovement
+            ]
+        ]);
+        exit;
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(["message" => "Error: " . $e->getMessage()]);
+        exit;
+    }
+}
+
+// POST flow
+$data = json_decode(file_get_contents("php://input"), true);
+if (!is_array($data)) $data = [];
 $action = $data['action'] ?? '';
 
 try {
     if ($action === 'confidence') {
         $userId = (int)($data['userId'] ?? 0);
         $moduleId = (int)($data['moduleId'] ?? 0);
-        $stage = $data['stage'] ?? null; // "before" or "after"
+        $stage = $data['stage'] ?? null;
         $rating = isset($data['rating']) ? (int)$data['rating'] : null;
 
-        $confidenceBefore = array_key_exists('confidence_before', $data)
+        $before = array_key_exists('confidence_before', $data)
             ? (int)$data['confidence_before']
             : ($stage === 'before' ? $rating : null);
 
-        $confidenceAfter = array_key_exists('confidence_after', $data)
+        $after = array_key_exists('confidence_after', $data)
             ? (int)$data['confidence_after']
             : ($stage === 'after' ? $rating : null);
 
-        if (!$userId || !$moduleId || ($confidenceBefore === null && $confidenceAfter === null)) {
+        if ($userId <= 0 || $moduleId <= 0 || ($before === null && $after === null)) {
             http_response_code(400);
-            echo json_encode(["message" => "Missing userId/moduleId/confidence value"]);
+            echo json_encode(["message" => "Missing confidence fields"]);
             exit;
         }
 
-        if ($isPdo) {
-            $database->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        // store module-level confidence on first lesson row of that module
+        $lessonStmt = $database->prepare("
+            SELECT id FROM lessons WHERE module_id = :module_id ORDER BY id ASC LIMIT 1
+        ");
+        $lessonStmt->execute([':module_id' => $moduleId]);
+        $lessonId = (int)$lessonStmt->fetchColumn();
 
-            $firstLessonStmt = $database->prepare("
-                SELECT id FROM lessons WHERE module_id = :moduleId ORDER BY id ASC LIMIT 1
-            ");
-            $firstLessonStmt->execute([':moduleId' => $moduleId]);
-            $firstLessonId = (int)$firstLessonStmt->fetchColumn();
-
-            if (!$firstLessonId) {
-                http_response_code(400);
-                echo json_encode(["message" => "No lessons found for module"]);
-                exit;
-            }
-
-            if ($confidenceBefore !== null) {
-                $u = $database->prepare("
-                    UPDATE progress
-                    SET confidence_before = :val
-                    WHERE user_id = :userId
-                      AND lesson_id IN (SELECT id FROM lessons WHERE module_id = :moduleId)
-                ");
-                $u->execute([':val' => $confidenceBefore, ':userId' => $userId, ':moduleId' => $moduleId]);
-
-                if ($u->rowCount() === 0) {
-                    $i = $database->prepare("
-                        INSERT INTO progress (user_id, lesson_id, status, completed, confidence_before)
-                        VALUES (:userId, :lessonId, 'not_started', 0, :val)
-                    ");
-                    $i->execute([':userId' => $userId, ':lessonId' => $firstLessonId, ':val' => $confidenceBefore]);
-                }
-            }
-
-            if ($confidenceAfter !== null) {
-                $u = $database->prepare("
-                    UPDATE progress
-                    SET confidence_after = :val
-                    WHERE user_id = :userId
-                      AND lesson_id IN (SELECT id FROM lessons WHERE module_id = :moduleId)
-                ");
-                $u->execute([':val' => $confidenceAfter, ':userId' => $userId, ':moduleId' => $moduleId]);
-
-                if ($u->rowCount() === 0) {
-                    $i = $database->prepare("
-                        INSERT INTO progress (user_id, lesson_id, status, completed, confidence_after)
-                        VALUES (:userId, :lessonId, 'not_started', 0, :val)
-                    ");
-                    $i->execute([':userId' => $userId, ':lessonId' => $firstLessonId, ':val' => $confidenceAfter]);
-                }
-            }
-        } else {
-            $firstLessonRes = $database->query("SELECT id FROM lessons WHERE module_id = {$moduleId} ORDER BY id ASC LIMIT 1");
-            $row = $firstLessonRes ? $firstLessonRes->fetch_assoc() : null;
-            $firstLessonId = $row ? (int)$row['id'] : 0;
-
-            if (!$firstLessonId) {
-                http_response_code(400);
-                echo json_encode(["message" => "No lessons found for module"]);
-                exit;
-            }
-
-            if ($confidenceBefore !== null) {
-                $database->query("
-                    UPDATE progress
-                    SET confidence_before = {$confidenceBefore}
-                    WHERE user_id = {$userId}
-                      AND lesson_id IN (SELECT id FROM lessons WHERE module_id = {$moduleId})
-                ");
-                if ($database->affected_rows === 0) {
-                    $database->query("
-                        INSERT INTO progress (user_id, lesson_id, status, completed, confidence_before)
-                        VALUES ({$userId}, {$firstLessonId}, 'not_started', 0, {$confidenceBefore})
-                    ");
-                }
-            }
-
-            if ($confidenceAfter !== null) {
-                $database->query("
-                    UPDATE progress
-                    SET confidence_after = {$confidenceAfter}
-                    WHERE user_id = {$userId}
-                      AND lesson_id IN (SELECT id FROM lessons WHERE module_id = {$moduleId})
-                ");
-                if ($database->affected_rows === 0) {
-                    $database->query("
-                        INSERT INTO progress (user_id, lesson_id, status, completed, confidence_after)
-                        VALUES ({$userId}, {$firstLessonId}, 'not_started', 0, {$confidenceAfter})
-                    ");
-                }
-            }
+        if ($lessonId <= 0) {
+            http_response_code(400);
+            echo json_encode(["message" => "No lessons found for module"]);
+            exit;
         }
 
-        echo json_encode(["message" => "Confidence rating saved"]);
+        $upsert = $database->prepare("
+            INSERT INTO progress
+                (user_id, lesson_id, status, completed, confidence_before, confidence_after, last_attempt_at)
+            VALUES
+                (:user_id, :lesson_id, 'not_started', 0, :before_insert, :after_insert, NOW())
+            ON DUPLICATE KEY UPDATE
+                confidence_before = COALESCE(:before_update, confidence_before),
+                confidence_after  = COALESCE(:after_update, confidence_after),
+                last_updated = NOW()
+        ");
+
+        $upsert->execute([
+            ':user_id' => $userId,
+            ':lesson_id' => $lessonId,
+            ':before_insert' => $before,
+            ':after_insert' => $after,
+            ':before_update' => $before,
+            ':after_update' => $after
+        ]);
+
+        echo json_encode(["message" => "Confidence saved"]);
         exit;
     }
 

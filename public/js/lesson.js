@@ -95,6 +95,28 @@ async function savePracticeResult(lessonId, isCorrect) {
     return result;
 }
 
+async function saveFeedback(userId, moduleId, formData) {
+    const res = await fetch('/backend/api/module-feedback.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            userId,
+            moduleId,
+            easeOfUse: formData.easeOfUse,
+            coachHelpfulness: formData.coachHelpfulness,
+            confidenceImprovement: formData.confidenceImprovement,
+            difficulties: formData.difficulties
+        })
+    });
+
+    if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`saveFeedback failed: ${res.status} ${txt}`);
+    }
+
+    return res.json();
+}
+
 function getPracticeStorageKey() {
     const userId = Number(localStorage.getItem('userId') || 1);
     return `lp_practice_passed_module_${getModuleId()}_user_${userId}`;
@@ -592,6 +614,79 @@ async function ensureAfterConfidenceCaptured() {
     sessionStorage.setItem(afterKey, '1');
 }
 
+function showFeedbackForm(userId, moduleId) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+        overlay.innerHTML = `
+            <div style="background:#fff;padding:24px;border-radius:12px;max-width:480px;width:92%;max-height:90vh;overflow-y:auto;">
+                <h2 style="margin:0 0 18px;">Module Feedback</h2>
+                <form id="feedback-form">
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:8px;font-weight:600;">Was this module easy to use?</label>
+                        <div style="display:flex;gap:8px;">
+                            ${[1,2,3,4,5].map(n => `<label style="flex:1;text-align:center;"><input type="radio" name="ease" value="${n}" required> <span>${n}</span></label>`).join('')}
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:8px;font-weight:600;">Did the Coach help?</label>
+                        <div style="display:flex;gap:8px;">
+                            ${[1,2,3,4,5].map(n => `<label style="flex:1;text-align:center;"><input type="radio" name="coach" value="${n}" required> <span>${n}</span></label>`).join('')}
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:8px;font-weight:600;">Do you feel more confident now?</label>
+                        <div style="display:flex;gap:8px;">
+                            ${[1,2,3,4,5].map(n => `<label style="flex:1;text-align:center;"><input type="radio" name="confidence" value="${n}" required> <span>${n}</span></label>`).join('')}
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:8px;font-weight:600;">What was difficult? (optional)</label>
+                        <textarea name="difficulties" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;font-family:inherit;font-size:14px;" rows="4" placeholder="Share any challenges you faced..."></textarea>
+                    </div>
+
+                    <div style="display:flex;gap:10px;">
+                        <button type="submit" style="flex:1;padding:10px;background:#2563eb;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600;">Submit Feedback</button>
+                        <button type="button" id="feedback-skip" style="flex:1;padding:10px;background:#e5e7eb;border:0;border-radius:6px;cursor:pointer;font-weight:600;">Skip</button>
+                    </div>
+                </form>
+                </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        const form = overlay.querySelector('#feedback-form');
+        const skipBtn = overlay.querySelector('#feedback-skip');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = {
+                easeOfUse: Number(form.ease.value),
+                coachHelpfulness: Number(form.coach.value),
+                confidenceImprovement: Number(form.confidence.value),
+                difficulties: form.difficulties.value
+            };
+
+            try {
+                await saveFeedback(userId, moduleId, formData);
+                overlay.remove();
+                resolve(true);
+            } catch (err) {
+                console.error('Error submitting feedback:', err);
+                alert('Could not save feedback. Please try again.');
+            }
+        });
+
+        skipBtn.addEventListener('click', () => {
+            overlay.remove();
+            resolve(false);
+        });
+    });
+}
+
 async function markModuleComplete() {
     const userId = Number(localStorage.getItem('userId') || 1);
     const moduleId = Number(new URLSearchParams(window.location.search).get('moduleId') || 0);
@@ -609,8 +704,13 @@ async function markModuleComplete() {
 
 async function completeModuleFlow() {
     await ensureAfterConfidenceCaptured();
-    await markModuleComplete();
+    
+    const userId = Number(localStorage.getItem('userId') || 1);
     const moduleId = getModuleId();
+    
+    await showFeedbackForm(userId, moduleId);
+    await markModuleComplete();
+    
     window.location.href = `/public/progress.html?moduleId=${moduleId}&completed=1`;
 }
 

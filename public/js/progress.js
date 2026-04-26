@@ -4,18 +4,14 @@ document.addEventListener('DOMContentLoaded', async function () {
     const userId = Number(localStorage.getItem('userId') || 1);
 
     try {
-        const [progressData, suggestionsData, modulesData] = await Promise.all([
-            fetchProgressData(userId),
-            fetchSuggestionsData(userId),
-            fetchModulesData() // full catalog fallback for recommendation logic
-        ]);
-
+        const { progressData, overview } = await fetchProgressData(userId);
         console.log('[progress] progressData:', progressData);
+
         console.log('[progress] confidence rows:', progressData.filter(p => p.confidence_before != null || p.confidence_after != null));
 
         renderProgress(progressData);
-        const recommended = renderAdaptiveSuggestions(progressData, suggestionsData, modulesData);
-        renderOverview(progressData, suggestionsData, modulesData, recommended);
+        const recommended = renderAdaptiveSuggestions(progressData, overview);
+        renderOverview(progressData, overview);
     } catch (error) {
         console.error('Error loading progress page:', error);
         const progressList = document.getElementById('progress-list');
@@ -50,8 +46,19 @@ function normalizeId(value) {
 async function fetchProgressData(userId) {
     const res = await fetch(`/backend/api/progress.php?userId=${encodeURIComponent(userId)}`);
     if (!res.ok) throw new Error(`Progress API failed (${res.status})`);
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
+
+    const payload = await res.json();
+    console.log('[progress] raw payload:', payload);
+
+    // IMPORTANT: progress.php returns { progress: [...], overview: {...} }
+    const progressData = Array.isArray(payload?.progress) ? payload.progress : [];
+    const overview = payload?.overview ?? {
+        completedLessons: 0,
+        practiceSuccessRate: 0,
+        averageConfidenceImprovement: 0
+    };
+
+    return { progressData, overview };
 }
 
 async function fetchSuggestionsData(userId) {
