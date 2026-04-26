@@ -65,8 +65,34 @@ async function saveLessonProgress(lessonId) {
     }
 }
 
-async function savePracticeProgress() {
-    localStorage.setItem(getPracticeStorageKey(), JSON.stringify([...passedPracticeLessonIds]));
+async function savePracticeResult(lessonId, isCorrect) {
+    const userId = Number(localStorage.getItem('userId') || localStorage.getItem('id') || 1); // use || 1 not || 0
+    if (!userId || !lessonId) {
+        console.warn('savePracticeResult: missing userId or lessonId', { userId, lessonId });
+        return;
+    }
+
+    console.log('Saving practice result:', { userId, lessonId, isCorrect }); // debug
+
+    const res = await fetch('/backend/api/progress.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'practice_result',
+            userId,
+            lessonId,
+            isCorrect: !!isCorrect
+        })
+    });
+
+    if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`savePracticeResult failed: ${res.status} ${t}`);
+    }
+
+    const result = await res.json();
+    console.log('Practice result saved:', result); // debug
+    return result;
 }
 
 function getPracticeStorageKey() {
@@ -81,6 +107,17 @@ function loadPracticeProgress() {
         passedPracticeLessonIds = new Set(Array.isArray(arr) ? arr.map(Number) : []);
     } catch {
         passedPracticeLessonIds = new Set();
+    }
+}
+
+function savePracticeProgress() {
+    try {
+        const ids = [...passedPracticeLessonIds]
+            .map(Number)
+            .filter((id) => Number.isFinite(id) && id > 0);
+        localStorage.setItem(getPracticeStorageKey(), JSON.stringify(ids));
+    } catch (error) {
+        console.warn('Could not save practice progress:', error);
     }
 }
 
@@ -725,23 +762,33 @@ function renderPractice(item, nextItemKey, taskTypeOverride = null) {
         return String(selectedSingle || '').trim().toLowerCase() === correct;
     };
 
-    checkBtn.onclick = () => {
+    checkBtn.onclick = async () => {
         const ok = evaluate();
         const feedbackEl = document.getElementById('practice-feedback');
         if (!feedbackEl) return;
+
         feedbackEl.textContent = ok
             ? (task.correctFeedback || 'Correct.')
             : `${task.wrongFeedback || 'Try again.'} You must answer correctly to continue.`;
         feedbackEl.style.color = ok ? '#1b5e20' : '#b71c1c';
         nextBtn.disabled = !ok;
         updateCoachFromPractice(ok, task, item.label || 'lesson');
+
+        const lessonId = Number(item.lessonId || String(item.key || '').replace('lesson-', ''));
+        if (!Number.isNaN(lessonId)) {
+            try {
+                await savePracticeResult(lessonId, ok); // save both correct and wrong attempts
+            } catch (e) {
+                console.warn('Could not save practice result:', e);
+            }
+        }
+
         if (ok) {
-            const lessonId = Number(item.lessonId || String(item.key || '').replace('lesson-', ''));
             if (!Number.isNaN(lessonId)) {
                 passedPracticeLessonIds.add(lessonId);
                 completedLessonIds.add(lessonId);
                 savePracticeProgress();
-                saveLessonProgress(lessonId);
+                // saveLessonProgress(lessonId); // remove: practice_result already updates progress row
                 renderNav(currentItemKey);
             }
         }

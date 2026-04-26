@@ -1,51 +1,195 @@
 <?php
-require_once '../config/database.php';
+// filepath: /Users/jemimansandax/Desktop/synoptic project/learning-platform/backend/api/admin-metrics.php
+require_once __DIR__ . '/../config/database.php';
 
 header("Content-Type: application/json; charset=UTF-8");
 
-// Verify admin access
-$role = $_GET['role'] ?? null;
-
-$database = new Database();
-$db = $database->getConnection();
-
-if ($db === null) {
-    http_response_code(500);
-    echo json_encode(array("message" => "Database connection failed"));
+if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+    http_response_code(405);
+    echo json_encode(["message" => "Method not allowed"]);
     exit;
 }
 
-try {
-    // Total users
-    $stmt = $db->prepare("SELECT COUNT(*) as count FROM users");
-    $stmt->execute();
-    $totalUsers = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
-    
-    // Active users today
-    $stmt = $db->prepare("SELECT COUNT(DISTINCT user_id) as count FROM progress WHERE DATE(completed_at) = CURDATE()");
-    $stmt->execute();
-    $activeUsers = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
-    
-    // Total lessons completed
-    $stmt = $db->prepare("SELECT COUNT(*) as count FROM progress WHERE completed = 1");
-    $stmt->execute();
-    $totalCompleted = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
-    
-    // Platform efficiency (completion rate)
-    $stmt = $db->prepare("SELECT COUNT(*) as total FROM progress");
-    $stmt->execute();
-    $totalProgress = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
-    
-    $efficiency = $totalProgress > 0 ? round(($totalCompleted / $totalProgress) * 100) : 0;
-    
-    echo json_encode(array(
-        "totalUsers" => $totalUsers,
-        "activeUsers" => $activeUsers,
-        "totalCompleted" => $totalCompleted,
-        "efficiency" => $efficiency
-    ));
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(array("message" => "Database error: " . $e->getMessage()));
+/**
+ * Resolve DB connection from multiple common patterns:
+ * - $conn / $pdo / $db / $mysqli / $database / $connection
+ * - function getConnection() / getDatabaseConnection()
+ * - class Database->getConnection()
+ */
+$database = null;
+
+// 1) Direct globals
+foreach (['conn', 'pdo', 'db', 'mysqli', 'database', 'connection'] as $name) {
+    if (isset($GLOBALS[$name])) {
+        $database = $GLOBALS[$name];
+        break;
+    }
 }
-?>
+
+// 2) Function-based connection
+if (!$database && function_exists('getDatabaseConnection')) {
+    $database = getDatabaseConnection();
+}
+if (!$database && function_exists('getConnection')) {
+    $database = getConnection();
+}
+
+// 3) Class-based connection
+if (
+    !$database &&
+    class_exists('Database')
+) {
+    $dbObj = new Database();
+    if (method_exists($dbObj, 'getConnection')) {
+        $database = $dbObj->getConnection();
+    }
+}
+
+$isPdo = $database instanceof PDO;
+$isMysqli = class_exists('mysqli') && $database instanceof mysqli;
+
+if (!$isPdo && !$isMysqli) {
+    http_response_code(500);
+    echo json_encode([
+        "message" => "Database connection not initialized",
+        "hint" => "Check backend/config/database.php export (e.g. \$conn, \$pdo, getConnection())"
+    ]);
+    exit;
+}
+
+if ($isPdo) {
+    $database->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+}
+
+function scalar($database, string $sql, $default = 0) {
+    try {
+        if ($database instanceof PDO) {
+            $v = $database->query($sql)->fetchColumn();
+            return ($v === false || $v === null || $v === '') ? $default : $v;
+        }
+        if (class_exists('mysqli') && $database instanceof mysqli) {
+            $result = $database->query($sql);
+            if (!$result) return $default;
+            $row = $result->fetch_row();
+            return (!$row || !isset($row[0]) || $row[0] === null || $row[0] === '') ? $default : $row[0];
+        }
+    } catch (Throwable $e) {
+        return $default;
+    }
+    return $default;
+}
+
+try {
+    $totalUsers = (int) scalar($database, "SELECT COUNT(*) FROM users", 0);
+
+    $totalCompletedLessons = (int) scalar(
+        $database,
+        "SELECT COUNT(*) FROM progress WHERE completed = 1",
+        (int) scalar($database, "SELECT COUNT(*) FROM progress", 0)
+    );
+
+    $moduleCompletionPercent = (float) scalar(
+        $database,
+        "SELECT ROUND(AVG(completed) * 100, 2) FROM progress",
+        0
+    );
+
+    $mostPopularModule = (string) scalar($database, "
+        SELECT m.title
+        FROM modules m
+        JOIN lessons l ON l.module_id = m.id
+        JOIN progress p ON p.lesson_id = l.id
+        GROUP BY m.id, m.title
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    ", "-");
+
+    $leastCompletedModule = (string) scalar($database, "
+        SELECT m.title
+        FROM modules m
+        LEFT JOIN lessons l ON l.module_id = m.id
+        LEFT JOIN progress p ON p.lesson_id = l.id
+        GROUP BY m.id, m.title
+        ORDER BY COUNT(p.lesson_id) ASC
+        LIMIT 1
+    ", "-");
+
+    $averageConfidenceImprovement = (float) scalar(
+        $database,
+        "SELECT ROUND(AVG(confidence_after - confidence_before), 2) 
+         FROM progress 
+         WHERE confidence_before IS NOT NULL 
+         AND confidence_after IS NOT NULL",
+        0
+    );
+
+    $practiceSuccessRate = (float) scalar(
+        $database,
+        "SELECT ROUND(
+            (SUM(correct_attempts) * 100.0) / NULLIF(SUM(attempts), 0)
+        , 2)
+        FROM progress
+        WHERE attempts > 0",
+        0
+    );
+
+    // NEW: Check for lessonPerformance query param
+    $lessonPerformance = [];
+    if (!empty($_GET['include']) && $_GET['include'] === 'lessonPerformance') {
+        try {
+            $sql = "
+                SELECT 
+                    u.username,
+                    l.title AS lesson_title,
+                    COALESCE(p.last_score, 0) AS lesson_score,
+                    COALESCE(p.attempts, 0) AS attempts,
+                    CASE 
+                        WHEN COALESCE(p.completed, 0) = 1 OR COALESCE(p.last_score, 0) >= 70 THEN 'Pass'
+                        ELSE 'Fail'
+                    END AS pass_fail,
+                    GREATEST(COALESCE(p.attempts, 0) - 1, 0) AS retry_count,
+                    p.last_attempt_at
+                FROM progress p
+                INNER JOIN (
+                    SELECT MAX(id) AS id
+                    FROM progress
+                    GROUP BY user_id, lesson_id
+                ) latest ON latest.id = p.id
+                JOIN users u ON u.id = p.user_id
+                JOIN lessons l ON l.id = p.lesson_id
+                ORDER BY p.last_attempt_at DESC, p.id DESC
+                LIMIT 200
+            ";
+
+            if ($isPdo) {
+                $stmt = $database->query($sql);
+                $lessonPerformance = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                $result = $database->query($sql);
+                $lessonPerformance = [];
+                while ($row = $result->fetch_assoc()) {
+                    $lessonPerformance[] = $row;
+                }
+            }
+        } catch (Throwable $e) {
+            error_log("lesson performance error: " . $e->getMessage());
+        }
+    }
+
+    echo json_encode([
+        "totalUsers" => $totalUsers,
+        "totalCompletedLessons" => $totalCompletedLessons,
+        "moduleCompletionPercent" => $moduleCompletionPercent,
+        "mostPopularModule" => $mostPopularModule ?: "-",
+        "leastCompletedModule" => $leastCompletedModule ?: "-",
+        "averageConfidenceImprovement" => $averageConfidenceImprovement,
+        "practiceSuccessRate" => $practiceSuccessRate,
+        "lessonPerformance" => $lessonPerformance
+    ]);
+} catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode([
+        "message" => "Failed to load admin stats",
+        "error" => $e->getMessage()
+    ]);
+}

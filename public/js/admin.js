@@ -1,45 +1,66 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Check if user is admin
+document.addEventListener('DOMContentLoaded', () => {
     const role = localStorage.getItem('role');
     if (role !== 'admin') {
         window.location.href = 'admin-login.html';
         return;
     }
-    
+
     loadDashboardMetrics();
     loadActivityData();
 });
 
-function loadDashboardMetrics() {
-    fetch('/backend/api/admin-metrics.php')
-        .then(response => response.json())
-        .then(data => {
-            document.getElementById('total-users').textContent = data.totalUsers;
-            document.getElementById('active-users').textContent = data.activeUsers;
-            document.getElementById('total-completed').textContent = data.totalCompleted;
-            document.getElementById('efficiency').textContent = data.efficiency + '%';
-        })
-        .catch(error => console.error('Error loading metrics:', error));
+function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
 }
 
-function loadActivityData() {
-    fetch('/backend/api/admin-activity.php')
-        .then(response => response.json())
-        .then(data => {
-            const tbody = document.getElementById('activity-body');
-            tbody.innerHTML = '';
-            data.slice(0, 10).forEach(activity => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${activity.username}</td>
-                    <td>${activity.action}</td>
-                    <td>${activity.lesson_title || activity.module_title}</td>
-                    <td>${new Date(activity.timestamp).toLocaleString()}</td>
-                `;
-                tbody.appendChild(row);
-            });
-        })
-        .catch(error => console.error('Error loading activity:', error));
+async function loadDashboardMetrics() {
+    try {
+        const res = await fetch('/backend/api/admin-metrics.php');
+
+        // Better debugging for 500 responses
+        if (!res.ok) {
+            const body = await res.text();
+            throw new Error(`HTTP ${res.status}: ${body}`);
+        }
+
+        const data = await res.json();
+
+        setText('total-users', data.totalUsers ?? 0);
+        setText('total-completed', data.totalCompletedLessons ?? 0);
+        setText('module-completion', `${data.moduleCompletionPercent ?? 0}%`);
+        setText('most-popular-module', data.mostPopularModule ?? '-');
+        setText('least-completed-module', data.leastCompletedModule ?? '-');
+        setText('avg-confidence-improvement', data.averageConfidenceImprovement ?? 0);
+        setText('practice-success-rate', `${data.practiceSuccessRate ?? 0}%`);
+    } catch (error) {
+        console.error('Error loading metrics:', error);
+    }
+}
+
+async function loadActivityData() {
+    try {
+        const res = await fetch('/backend/api/admin-activity.php');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        const tbody = document.getElementById('activity-body');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+        (data || []).slice(0, 10).forEach(activity => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${activity.username ?? ''}</td>
+                <td>${activity.action ?? ''}</td>
+                <td>${activity.lesson_title || activity.module_title || ''}</td>
+                <td>${activity.timestamp ? new Date(activity.timestamp).toLocaleString() : ''}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Error loading activity:', error);
+    }
 }
 
 function logout() {

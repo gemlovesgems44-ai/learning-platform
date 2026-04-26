@@ -57,3 +57,48 @@
 #activity-table tr:hover {
     background: #f9f9f9;
 }
+
+.dashboard-overview .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    align-items: stretch;
+}
+
+.dashboard-overview .metric-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    min-height: 110px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.dashboard-overview .metric-card h3 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    color: #374151;
+    font-weight: 600;
+}
+
+.dashboard-overview .metric-value {
+    margin: 0;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.2;
+    word-break: break-word;
+}
+
+@media (max-width: 640px) {
+    .dashboard-overview .metrics-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-overview .metric-value {
+        font-size: 1.35rem;
+    }
+}
