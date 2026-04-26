@@ -18,13 +18,33 @@
             </ul>
         </nav>
     </header>
-    <main>
-        <section id="progress-section">
-            <h2>Completed Lessons</h2>
+    <main class="progress-page">
+        <section class="progress-overview" id="progress-overview">
+            <div class="overview-card">
+                <h3>Completed</h3>
+                <p id="ov-completed">0 lessons · 0 modules</p>
+            </div>
+            <div class="overview-card">
+                <h3>Confidence</h3>
+                <p id="ov-confidence">Loading...</p>
+            </div>
+            <div class="overview-card">
+                <h3>Practice Results</h3>
+                <p id="ov-practice">N/A</p>
+            </div>
+            <div class="overview-card">
+                <h3>Next Recommended</h3>
+                <p id="ov-next">N/A</p>
+            </div>
+        </section>
+
+        <section>
+            <h2>Your Progress</h2>
             <div id="progress-list"></div>
         </section>
-        <section id="next-steps">
-            <h2>Suggested Next Steps</h2>
+
+        <section>
+            <h2>Recommended Next</h2>
             <div id="suggestions"></div>
         </section>
     </main>

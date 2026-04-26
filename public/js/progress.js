@@ -4,13 +4,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     const userId = Number(localStorage.getItem('userId') || 1);
 
     try {
-        const [progressData, suggestionsData] = await Promise.all([
+        const [progressData, suggestionsData, modulesData] = await Promise.all([
             fetchProgressData(userId),
-            fetchSuggestionsData(userId)
+            fetchSuggestionsData(userId),
+            fetchModulesData() // full catalog fallback for recommendation logic
         ]);
 
+        console.log('[progress] progressData:', progressData);
+        console.log('[progress] confidence rows:', progressData.filter(p => p.confidence_before != null || p.confidence_after != null));
+
         renderProgress(progressData);
-        renderAdaptiveSuggestions(progressData, suggestionsData);
+        const recommended = renderAdaptiveSuggestions(progressData, suggestionsData, modulesData);
+        renderOverview(progressData, suggestionsData, modulesData, recommended);
     } catch (error) {
         console.error('Error loading progress page:', error);
         const progressList = document.getElementById('progress-list');
@@ -56,6 +61,17 @@ async function fetchSuggestionsData(userId) {
     return Array.isArray(data) ? data : [];
 }
 
+async function fetchModulesData() {
+    try {
+        const res = await fetch('/backend/api/modules.php');
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+    } catch {
+        return [];
+    }
+}
+
 function getCompletionPercent(item) {
     const raw =
         item.completionPercent ??
@@ -78,6 +94,8 @@ function isCompleted(item) {
     return pct === 100;
 }
 
+let progressExpanded = false;
+
 function renderProgress(data) {
     const progressList = document.getElementById('progress-list');
     if (!progressList) return;
@@ -87,7 +105,10 @@ function renderProgress(data) {
         return;
     }
 
-    progressList.innerHTML = data.map((item, idx) => {
+    const visibleCount = progressExpanded ? data.length : 5;
+    const visibleItems = data.slice(0, visibleCount);
+
+    const rows = visibleItems.map((item, idx) => {
         const title = item.lessonTitle || item.lesson_title || item.title || `Lesson ${idx + 1}`;
         const dateField =
             item.completedAt ||
@@ -100,16 +121,37 @@ function renderProgress(data) {
         const pct = getCompletionPercent(item);
         const completed = isCompleted(item);
         const statusText = completed ? 'Completed' : 'In progress';
-        const pctText = pct !== null ? `${pct}%` : (completed ? '100%' : '0%');
+        const pctNum = pct ?? (completed ? 100 : 0);
+        const pctText = `${pctNum}%`;
 
         return `
             <div class="progress-item">
                 <span class="progress-item-title">${title}</span>
                 <span class="progress-item-status">${statusText} · ${pctText}</span>
+                <progress value="${pctNum}" max="100"></progress>
                 <span class="progress-item-status">Last activity: ${formatDate(dateField)}</span>
             </div>
         `;
     }).join('');
+
+    const hasMore = data.length > 5;
+    const toggleBtn = hasMore
+        ? `
+            <button id="progress-toggle-btn" type="button" class="btn btn-secondary">
+                ${progressExpanded ? 'Show less' : `Show all (${data.length})`}
+            </button>
+          `
+        : '';
+
+    progressList.innerHTML = rows + toggleBtn;
+
+    if (hasMore) {
+        const btn = document.getElementById('progress-toggle-btn');
+        btn?.addEventListener('click', () => {
+            progressExpanded = !progressExpanded;
+            renderProgress(data);
+        });
+    }
 }
 
 function buildModuleProgressMap(progressData) {
@@ -154,31 +196,290 @@ function resolveModuleId(item) {
     return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function renderAdaptiveSuggestions(progressData, suggestionsData) {
+function tokenize(text) {
+    return String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .filter(w => !['the', 'and', 'for', 'with', 'from', 'your', 'this', 'that', 'into'].includes(w));
+}
+
+function jaccard(aTokens, bTokens) {
+    const a = new Set(aTokens);
+    const b = new Set(bTokens);
+    if (a.size === 0 || b.size === 0) return 0;
+
+    let intersection = 0;
+    a.forEach((t) => { if (b.has(t)) intersection += 1; });
+    const union = new Set([...a, ...b]).size;
+    return union ? (intersection / union) : 0;
+}
+
+function pickRandom(arr) {
+    if (!arr.length) return null;
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function renderAdaptiveSuggestions(progressData, suggestionsData, modulesData = []) {
     const suggestionsEl = document.getElementById('suggestions');
     if (!suggestionsEl) return;
 
-    if (!Array.isArray(suggestionsData) || suggestionsData.length === 0) {
+    // Prefer full catalog; fallback to suggestions API data.
+    const catalog = Array.isArray(modulesData) && modulesData.length ? modulesData : (Array.isArray(suggestionsData) ? suggestionsData : []);
+    if (!catalog.length) {
         suggestionsEl.innerHTML = '<p>No suggestions available yet.</p>';
+        return null;
+    }
+
+    const progressMap = buildModuleProgressMap(progressData);
+
+    // Completion metadata (if suggestions endpoint provides it)
+    const completionByModuleId = new Map();
+    (Array.isArray(suggestionsData) ? suggestionsData : []).forEach((s) => {
+        const id = resolveModuleId(s);
+        if (!id) return;
+        completionByModuleId.set(id, {
+            completion: getCompletionPercent(s) ?? 0,
+            completed: isCompleted(s)
+        });
+    });
+
+    const normalized = catalog
+        .map((m) => {
+            const moduleId = resolveModuleId(m);
+            if (!moduleId) return null;
+
+            const compMeta = completionByModuleId.get(moduleId);
+            const completion = compMeta ? compMeta.completion : (getCompletionPercent(m) ?? 0);
+            const completed = compMeta ? compMeta.completed : isCompleted(m);
+            const started = completion > 0 || progressMap.has(moduleId);
+
+            return {
+                moduleId,
+                title: m.title || m.courseName || 'Course',
+                description: m.description || m.courseDescription || '',
+                completion,
+                completed,
+                started
+            };
+        })
+        .filter(Boolean);
+
+    if (!normalized.length) {
+        suggestionsEl.innerHTML = '<p>No valid suggestions available yet.</p>';
+        return null;
+    }
+
+    const completedModules = normalized.filter(m => m.completed || m.completion >= 100);
+    const inProgressModules = normalized.filter(m => !m.completed && m.completion > 0 && m.completion < 100);
+    const notStartedModules = normalized.filter(m => !m.completed && m.completion === 0 && !m.started);
+
+    // Rule 1: all done
+    if (completedModules.length === normalized.length) {
+        suggestionsEl.innerHTML = `<p>You have completed all of the learning modules on this site, you can try the ones you've previously completed</p>`;
+        return null;
+    }
+
+    let recommended = null;
+    let reason = '';
+
+    // Rule 2: if user has an unfinished module, recommend that first
+    if (inProgressModules.length > 0) {
+        recommended = [...inProgressModules].sort((a, b) => b.completion - a.completion)[0];
+        reason = `Continue this module (${recommended.completion}% complete).`;
+    }
+    // Rule 3: user has done none -> random
+    else if (completedModules.length === 0) {
+        recommended = pickRandom(notStartedModules.length ? notStartedModules : normalized.filter(m => !m.completed));
+        reason = 'Start here to begin your learning journey.';
+    }
+    // Rule 4: recommend most similar to completed modules
+    else {
+        const completedTokens = tokenize(
+            completedModules.map(m => `${m.title} ${m.description}`).join(' ')
+        );
+
+        const candidates = normalized.filter(m => !m.completed);
+        let best = null;
+        let bestScore = -1;
+
+        candidates.forEach((c) => {
+            const score = jaccard(completedTokens, tokenize(`${c.title} ${c.description}`));
+            if (score > bestScore) {
+                bestScore = score;
+                best = c;
+            }
+        });
+
+        recommended = best || pickRandom(candidates);
+        reason = 'Recommended because it is most similar to modules you completed.';
+    }
+
+    if (!recommended) {
+        suggestionsEl.innerHTML = '<p>No valid suggestions available yet.</p>';
+        return null;
+    }
+
+    suggestionsEl.innerHTML = `
+        <div class="suggestion-card">
+            <h3>${recommended.title}</h3>
+            <p>${recommended.description || 'Recommended next learning module.'}</p>
+            <p><strong>Why this recommendation:</strong> ${reason}</p>
+            <a href="lesson.html?moduleId=${encodeURIComponent(recommended.moduleId)}" class="btn btn-primary">Start</a>
+        </div>
+    `;
+    return recommended;
+}
+
+function normalizeConfidenceValue(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    if (n <= 5) return Math.round((n / 5) * 100); // 1-5 scale
+    return Math.max(0, Math.min(100, Math.round(n))); // 0-100 scale
+}
+
+function renderConfidenceSummary(progressData) {
+    const host = document.getElementById('ov-confidence');
+    if (!host) {
+        console.warn('[confidence] ov-confidence element not found');
         return;
     }
 
-    const top = suggestionsData.slice(0, 3);
-    const cards = top
-        .map((item) => {
-            const moduleId = resolveModuleId(item);
-            if (!moduleId) return '';
+    const rows = progressData.filter(p =>
+        p.confidence_before != null || p.confidence_after != null
+    );
 
-            return `
-                <div class="suggestion-card">
-                    <h3>${item.title || item.courseName || 'Course'}</h3>
-                    <p>${item.description || item.courseDescription || 'Recommended next step based on your progress.'}</p>
-                    <a href="lesson.html?moduleId=${encodeURIComponent(moduleId)}" class="btn btn-primary">Start</a>
-                </div>
-            `;
-        })
-        .filter(Boolean)
-        .join('');
+    console.log('[confidence] rows with data:', rows);
 
-    suggestionsEl.innerHTML = cards || '<p>No valid suggestions available yet.</p>';
+    if (!rows.length) {
+        host.textContent = 'No confidence data yet.';
+        return;
+    }
+
+    const withBoth = rows.find(p => p.confidence_before != null && p.confidence_after != null);
+    const withBefore = rows.find(p => p.confidence_before != null);
+    const withAfter = rows.find(p => p.confidence_after != null);
+
+    const before = Number(withBoth?.confidence_before ?? withBefore?.confidence_before ?? NaN);
+    const after = Number(withBoth?.confidence_after ?? withAfter?.confidence_after ?? NaN);
+
+    const beforeText = Number.isFinite(before) ? `${before}/5` : 'N/A';
+    const afterText = Number.isFinite(after) ? `${after}/5` : 'N/A';
+
+    let changeHTML = '';
+    if (Number.isFinite(before) && Number.isFinite(after)) {
+        const diff = after - before;
+        const sign = diff > 0 ? '+' : '';
+        const colour = diff > 0 ? '#1b5e20' : diff < 0 ? '#b71c1c' : '#555';
+        changeHTML = `<br><span style="color:${colour};font-weight:600;">Change: ${sign}${diff}</span>`;
+    }
+
+    host.innerHTML = `
+        Confidence before: <strong>${beforeText}</strong><br>
+        Confidence now: <strong>${afterText}</strong>
+        ${changeHTML}
+    `;
+}
+
+function getLatestRowsByLesson(progressData) {
+    const byLesson = new Map();
+
+    (Array.isArray(progressData) ? progressData : []).forEach((row) => {
+        const lessonId = Number(row.lesson_id ?? row.lessonId ?? 0);
+        if (!lessonId) return;
+
+        const prev = byLesson.get(lessonId);
+        if (!prev) {
+            byLesson.set(lessonId, row);
+            return;
+        }
+
+        const prevTime = new Date(prev.completed_at ?? prev.updated_at ?? prev.created_at ?? 0).getTime() || 0;
+        const rowTime = new Date(row.completed_at ?? row.updated_at ?? row.created_at ?? 0).getTime() || 0;
+        const prevId = Number(prev.id ?? 0);
+        const rowId = Number(row.id ?? 0);
+
+        if (rowTime > prevTime || (rowTime === prevTime && rowId > prevId)) {
+            byLesson.set(lessonId, row);
+        }
+    });
+
+    return [...byLesson.values()];
+}
+
+function getPracticeResultsSummary(progressData) {
+    const rows = getLatestRowsByLesson(progressData);
+
+    let attempted = 0;
+    let passed = 0;
+    const scores = [];
+
+    rows.forEach((r) => {
+        // Treat each lesson row as a practice attempt once it exists in progress
+        attempted += 1;
+
+        const score = Number(r.quiz_score ?? r.score ?? r.accuracy);
+        if (Number.isFinite(score)) scores.push(score);
+
+        const passFlag = r.passed ?? r.is_correct ?? r.correct ?? null;
+        const status = String(r.status || '').toLowerCase();
+        const completed = isCompleted(r);
+        const scorePass = Number.isFinite(score) ? score >= 70 : false;
+
+        if (
+            passFlag === true || passFlag === 1 || passFlag === '1' || passFlag === 'true' ||
+            completed || status === 'completed' || scorePass
+        ) {
+            passed += 1;
+        }
+    });
+
+    const passRate = attempted > 0 ? Math.round((passed / attempted) * 100) : 0;
+    const avgScore = scores.length
+        ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+        : null;
+
+    return { attempted, passed, passRate, avgScore };
+}
+
+function renderOverview(progressData, suggestionsData, modulesData, recommended) {
+    const completedLessons = progressData.filter(isCompleted).length;
+
+    const completedModuleIds = new Set(
+        progressData
+            .filter(isCompleted)
+            .map(p => p.module_id ?? p.moduleId)
+            .filter(Boolean)
+    );
+
+    const totalModules = (Array.isArray(modulesData) && modulesData.length)
+        ? modulesData.length
+        : completedModuleIds.size;
+
+    const completedModules = completedModuleIds.size;
+
+    const practice = getPracticeResultsSummary(progressData);
+    const practiceText = practice.attempted === 0
+        ? 'No practice attempts yet'
+        : `${practice.passed}/${practice.attempted} passed (${practice.passRate}%)` +
+          (practice.avgScore != null ? ` · Avg score ${practice.avgScore}%` : '');
+
+    const overallPct = totalModules > 0
+        ? Math.round((completedModules / totalModules) * 100)
+        : 0;
+
+    const completedEl = document.getElementById('ov-completed');
+    const practiceEl = document.getElementById('ov-practice');
+    const nextEl = document.getElementById('ov-next');
+    const barEl = document.getElementById('ov-progress-bar');
+    const barTextEl = document.getElementById('ov-progress-text');
+
+    if (completedEl) completedEl.textContent = `${completedLessons} lessons · ${completedModules} modules`;
+    if (practiceEl) practiceEl.textContent = practiceText;
+    if (nextEl) nextEl.textContent = recommended?.title || 'No recommendation yet';
+    if (barEl) barEl.value = overallPct;
+    if (barTextEl) barTextEl.textContent = `${overallPct}%`;
+
+    renderConfidenceSummary(progressData);
 }

@@ -225,6 +225,10 @@ section h2 {
     margin-top: 4px; /* small consistent space before button */
 }
 
+#progress-toggle-btn {
+  margin-top: 12px;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     header h1 {
