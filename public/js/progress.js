@@ -101,6 +101,14 @@ function isCompleted(item) {
     if (typeof flag === 'boolean') return flag;
     if (flag === 1 || flag === '1' || flag === 'true') return true;
 
+    const status = String(item.status ?? '').toLowerCase();
+    if (status === 'completed' || status === 'complete' || status === 'passed') return true;
+
+    if (item.completed_at || item.completedAt) return true;
+
+    const lastScore = Number(item.last_score ?? item.lastScore ?? item.score ?? item.quiz_score);
+    if (Number.isFinite(lastScore) && lastScore >= 100) return true;
+
     const pct = getCompletionPercent(item);
     return pct === 100;
 }
@@ -129,17 +137,19 @@ function renderProgress(data) {
             item.date_completed ||
             null;
 
-        const pct = getCompletionPercent(item);
         const completed = isCompleted(item);
-        const statusText = completed ? 'Completed' : 'In progress';
-        const pctNum = pct ?? (completed ? 100 : 0);
-        const pctText = `${pctNum}%`;
+        const statusText = completed ? 'Completed' : 'Not completed';
+        const tick = completed ? '✓' : '○';
+        const tickClass = completed ? 'is-complete' : 'is-incomplete';
 
         return `
             <div class="progress-item">
-                <span class="progress-item-title">${title}</span>
-                <span class="progress-item-status">${statusText} · ${pctText}</span>
-                <progress value="${pctNum}" max="100"></progress>
+                <div class="progress-item-row">
+                    <span class="progress-item-title">${title}</span>
+                    <span class="progress-complete-badge ${tickClass}" aria-label="${statusText}">
+                        ${tick} ${statusText}
+                    </span>
+                </div>
                 <span class="progress-item-status">Last activity: ${formatDate(dateField)}</span>
             </div>
         `;
@@ -455,18 +465,17 @@ function getPracticeResultsSummary(progressData) {
 }
 
 function renderOverview(progressData, suggestionsData, modulesData, recommended) {
-    const completedLessons = progressData.filter(isCompleted).length;
+    const latestRows = getLatestRowsByLesson(progressData);
+    const completedLessonRows = latestRows.filter(isCompleted);
+
+    const completedLessons = completedLessonRows.length;
+    const totalLessons = latestRows.length;
 
     const completedModuleIds = new Set(
-        progressData
-            .filter(isCompleted)
+        completedLessonRows
             .map(p => p.module_id ?? p.moduleId)
             .filter(Boolean)
     );
-
-    const totalModules = (Array.isArray(modulesData) && modulesData.length)
-        ? modulesData.length
-        : completedModuleIds.size;
 
     const completedModules = completedModuleIds.size;
 
@@ -476,9 +485,8 @@ function renderOverview(progressData, suggestionsData, modulesData, recommended)
         : `${practice.passed}/${practice.attempted} passed (${practice.passRate}%)` +
           (practice.avgScore != null ? ` · Avg score ${practice.avgScore}%` : '');
 
-    const overallPct = totalModules > 0
-        ? Math.round((completedModules / totalModules) * 100)
-        : 0;
+    const allCompleted = totalLessons > 0 && completedLessons === totalLessons;
+    const overallPct = allCompleted ? 100 : 0;
 
     const completedEl = document.getElementById('ov-completed');
     const practiceEl = document.getElementById('ov-practice');
@@ -486,8 +494,12 @@ function renderOverview(progressData, suggestionsData, modulesData, recommended)
     const barEl = document.getElementById('ov-progress-bar');
     const barTextEl = document.getElementById('ov-progress-text');
 
-    if (completedEl) completedEl.textContent = `${completedLessons} lessons · ${completedModules} modules`;
+    if (completedEl) {
+        completedEl.textContent = `${completedLessons}/${totalLessons} lessons · ${completedModules} modules`;
+    }
+
     if (practiceEl) practiceEl.textContent = practiceText;
+
     if (nextEl) {
         if (recommended?.title) {
             const moduleId = recommended.moduleId;
@@ -495,13 +507,17 @@ function renderOverview(progressData, suggestionsData, modulesData, recommended)
                 ? `<a href="lesson.html?moduleId=${encodeURIComponent(moduleId)}">${recommended.title}</a>`
                 : recommended.title;
         } else {
-            // fallback: first incomplete lesson
-            const nextRow = progressData.find(r => !isCompleted(r));
+            const nextRow = latestRows.find(r => !isCompleted(r));
             nextEl.textContent = nextRow?.lesson_title || nextRow?.module_title || 'No recommendation yet';
         }
     }
+
     if (barEl) barEl.value = overallPct;
-    if (barTextEl) barTextEl.textContent = `${overallPct}%`;
+    if (barTextEl) {
+        barTextEl.innerHTML = allCompleted
+            ? '<span class="progress-complete-badge is-complete">✓ Completed</span>'
+            : '<span class="progress-complete-badge is-incomplete">○ Not completed</span>';
+    }
 
     renderConfidenceSummary(progressData);
 }

@@ -187,6 +187,40 @@ section h2 {
     font-weight: 600;
 }
 
+.progress-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.progress-complete-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.progress-complete-badge.is-complete {
+    background: #e8f7ec;
+    color: #1f7a35;
+}
+
+.progress-complete-badge.is-incomplete {
+    background: #f3f4f6;
+    color: #4b5563;
+}
+
+@media (max-width: 640px) {
+    .progress-item-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
 /* Suggestions */
 #suggestions {
     display: grid;
