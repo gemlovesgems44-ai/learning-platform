@@ -18,7 +18,16 @@ async function fetchProgressData(userId) {
     const res = await fetch(`/backend/api/progress.php?userId=${encodeURIComponent(userId)}`);
     if (!res.ok) throw new Error(`Progress API failed (${res.status})`);
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+
+    console.log('[index] progress raw payload:', data);
+
+    // progress.php shape: { userId, progress: [...], overview: {...} }
+    if (Array.isArray(data?.progress)) return data.progress;
+
+    // fallback if endpoint ever returns array directly
+    if (Array.isArray(data)) return data;
+
+    return [];
 }
 
 async function fetchSuggestionsData(userId) {

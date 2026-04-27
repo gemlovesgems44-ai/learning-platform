@@ -4,14 +4,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     const userId = Number(localStorage.getItem('userId') || 1);
 
     try {
-        const { progressData, overview } = await fetchProgressData(userId);
-        console.log('[progress] progressData:', progressData);
+        const [{ progressData, overview }, modulesData] = await Promise.all([
+            fetchProgressData(userId),
+            fetchModulesData()
+        ]);
 
+        console.log('[progress] progressData:', progressData);
+        console.log('[progress] modulesData:', modulesData);
         console.log('[progress] confidence rows:', progressData.filter(p => p.confidence_before != null || p.confidence_after != null));
 
         renderProgress(progressData);
-        const recommended = renderAdaptiveSuggestions(progressData, overview);
-        renderOverview(progressData, overview);
+        const recommended = renderAdaptiveSuggestions(progressData, [], modulesData);
+        renderOverview(progressData, [], modulesData, recommended);
     } catch (error) {
         console.error('Error loading progress page:', error);
         const progressList = document.getElementById('progress-list');
@@ -484,9 +488,59 @@ function renderOverview(progressData, suggestionsData, modulesData, recommended)
 
     if (completedEl) completedEl.textContent = `${completedLessons} lessons · ${completedModules} modules`;
     if (practiceEl) practiceEl.textContent = practiceText;
-    if (nextEl) nextEl.textContent = recommended?.title || 'No recommendation yet';
+    if (nextEl) {
+        if (recommended?.title) {
+            const moduleId = recommended.moduleId;
+            nextEl.innerHTML = moduleId
+                ? `<a href="lesson.html?moduleId=${encodeURIComponent(moduleId)}">${recommended.title}</a>`
+                : recommended.title;
+        } else {
+            // fallback: first incomplete lesson
+            const nextRow = progressData.find(r => !isCompleted(r));
+            nextEl.textContent = nextRow?.lesson_title || nextRow?.module_title || 'No recommendation yet';
+        }
+    }
     if (barEl) barEl.value = overallPct;
     if (barTextEl) barTextEl.textContent = `${overallPct}%`;
 
     renderConfidenceSummary(progressData);
+}
+
+function normalizeSuggestions(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.suggestions)) return payload.suggestions;
+    if (Array.isArray(payload?.data)) return payload.data;
+    return [];
+}
+
+function renderNextSuggestion(suggestions) {
+    const host = document.getElementById('next-suggestion');
+    if (!host) return;
+
+    if (!suggestions.length) {
+        host.innerHTML = '<p>No recommendation available yet. Continue your current module.</p>';
+        return;
+    }
+
+    const item = suggestions[0];
+    const moduleId = resolveModuleId(item);
+    const title = item.title || item.courseName || 'Recommended module';
+    const desc = item.description || 'Continue learning with this next module.';
+
+    if (moduleId > 0) {
+        host.innerHTML = `
+            <p><strong>${title}</strong></p>
+            <p>${desc}</p>
+            <a class="btn" href="lesson.html?moduleId=${encodeURIComponent(moduleId)}">Start</a>
+        `;
+    } else {
+        host.innerHTML = `<p><strong>${title}</strong></p><p>${desc}</p>`;
+    }
+}
+
+function renderProgressOverview(progressRows, suggestions) {
+    const ovNext = document.getElementById('ov-next');
+    if (ovNext) {
+        ovNext.textContent = getNextRecommended(progressRows, suggestions);
+    }
 }
