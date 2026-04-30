@@ -176,14 +176,55 @@ try {
         }
     }
 
+    // Parse include flags safely (supports: ?include=lessonPerformance or ?include=lessonPerformance,moduleBreakdown)
+    $includeRaw = isset($_GET['include']) ? (string)$_GET['include'] : '';
+    $includeParts = array_filter(array_map('trim', explode(',', $includeRaw)));
+    $includeMap = array_fill_keys($includeParts, true);
+    $wantLessonPerformance = isset($includeMap['lessonPerformance']) || $includeRaw === '';
+
+    $moduleBreakdown = [];
+
+    if ($isPdo) {
+        $stmt = $database->query("
+            SELECT
+                m.id,
+                m.title,
+                COALESCE(SUM(CASE WHEN p.completed = 1 THEN 1 ELSE 0 END), 0) AS completed_count
+            FROM modules m
+            LEFT JOIN lessons l ON l.module_id = m.id
+            LEFT JOIN progress p ON p.lesson_id = l.id
+            GROUP BY m.id, m.title
+            ORDER BY m.id ASC
+        ");
+        $moduleBreakdown = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    } else {
+        $result = $database->query("
+            SELECT
+                m.id,
+                m.title,
+                COALESCE(SUM(CASE WHEN p.completed = 1 THEN 1 ELSE 0 END), 0) AS completed_count
+            FROM modules m
+            LEFT JOIN lessons l ON l.module_id = m.id
+            LEFT JOIN progress p ON p.lesson_id = l.id
+            GROUP BY m.id, m.title
+            ORDER BY m.id ASC
+        ");
+        while ($result && ($row = $result->fetch_assoc())) {
+            $moduleBreakdown[] = $row;
+        }
+    }
+
     echo json_encode([
         "totalUsers" => $totalUsers,
         "totalCompletedLessons" => $totalCompletedLessons,
         "moduleCompletionPercent" => $moduleCompletionPercent,
         "mostPopularModule" => $mostPopularModule ?: "-",
+        "mostPopularModuleCount" => $mostPopularModuleCount ?? 0,
         "leastCompletedModule" => $leastCompletedModule ?: "-",
+        "leastCompletedModuleCount" => $leastCompletedModuleCount ?? 0,
         "averageConfidenceImprovement" => $averageConfidenceImprovement,
         "practiceSuccessRate" => $practiceSuccessRate,
+        "moduleBreakdown" => $moduleBreakdown,
         "lessonPerformance" => $lessonPerformance
     ]);
 } catch (Throwable $e) {

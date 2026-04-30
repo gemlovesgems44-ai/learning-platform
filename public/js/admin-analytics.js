@@ -74,16 +74,20 @@ function buildCharts(data) {
     // 4) Module highlights (uses counts if provided)
     const moduleCtx = document.getElementById('moduleHighlightsChart');
     if (moduleCtx) {
+        const breakdown = Array.isArray(data.moduleBreakdown) ? data.moduleBreakdown : [];
+        const labels = breakdown.map(m => m.title || `Module ${m.id}`);
+        const values = breakdown.map(m => Number(m.completed_count || 0));
+
         charts.moduleHighlights = new Chart(moduleCtx, {
             type: 'bar',
             data: {
-                labels: [
+                labels: labels.length ? labels : [
                     data.mostPopularModule || 'Most Popular',
                     data.leastCompletedModule || 'Least Completed'
                 ],
                 datasets: [{
-                    label: 'Completed Lessons (count)',
-                    data: [
+                    label: 'Completed lessons',
+                    data: values.length ? values : [
                         data.mostPopularModuleCount || 0,
                         data.leastCompletedModuleCount || 0
                     ]
@@ -175,4 +179,4 @@ function logout() {
     localStorage.removeItem('username');
     localStorage.removeItem('role');
     window.location.href = 'index.html';
-} 
+}
