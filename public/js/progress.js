@@ -4,8 +4,9 @@ document.addEventListener('DOMContentLoaded', async function () {
     const userId = Number(localStorage.getItem('userId') || 1);
 
     try {
-        const [{ progressData, overview }, modulesData] = await Promise.all([
+        const [{ progressData }, { suggestions, aiSuggestion }, modulesData] = await Promise.all([
             fetchProgressData(userId),
+            fetchSuggestionsData(userId),
             fetchModulesData()
         ]);
 
@@ -14,8 +15,8 @@ document.addEventListener('DOMContentLoaded', async function () {
         console.log('[progress] confidence rows:', progressData.filter(p => p.confidence_before != null || p.confidence_after != null));
 
         renderProgress(progressData);
-        const recommended = renderAdaptiveSuggestions(progressData, [], modulesData);
-        renderOverview(progressData, [], modulesData, recommended);
+        const recommended = renderAdaptiveSuggestions(progressData, suggestions, modulesData);
+        renderOverview(progressData, suggestions, modulesData, recommended, aiSuggestion);
     } catch (error) {
         console.error('Error loading progress page:', error);
         const progressList = document.getElementById('progress-list');
@@ -69,7 +70,13 @@ async function fetchSuggestionsData(userId) {
     const res = await fetch(`/backend/api/suggestions.php?userId=${encodeURIComponent(userId)}`);
     if (!res.ok) throw new Error(`Suggestions API failed (${res.status})`);
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    console.log('[suggestions] payload:', data);
+
+    // normalize: now returns { suggestions: [...], aiSuggestion: {...}|null }
+    const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : (Array.isArray(data) ? data : []);
+    const aiSuggestion = data?.aiSuggestion ?? null;
+
+    return { suggestions, aiSuggestion };
 }
 
 async function fetchModulesData() {
@@ -464,7 +471,7 @@ function getPracticeResultsSummary(progressData) {
     return { attempted, passed, passRate, avgScore };
 }
 
-function renderOverview(progressData, suggestionsData, modulesData, recommended) {
+function renderOverview(progressData, suggestionsData, modulesData, recommended, aiSuggestion) {
     const latestRows = getLatestRowsByLesson(progressData);
     const completedLessonRows = latestRows.filter(isCompleted);
 

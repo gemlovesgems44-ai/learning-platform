@@ -47,7 +47,7 @@ async function fetchLessons(moduleId) {
         const data = JSON.parse(text);
         return Array.isArray(data) ? data : [];
     } catch {
-        throw new Error(`Invalid JSON from lessons.php: ${text}`);
+        throw new Error(`AI coach returned non-JSON: ${text.slice(0, 160)}`);
     }
 }
 
@@ -522,9 +522,21 @@ function initCoach() {
     document.querySelectorAll('.coach-btn').forEach((btn) => {
         if (btn.dataset.bound === '1') return;
         btn.dataset.bound = '1';
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {          // make async
             const action = btn.dataset.action || 'explain';
-            typeText(output, buildCoachResponse(action));
+            console.log('[AI Coach] button clicked:', action); // ADD THIS
+
+            // show loading state
+            output.textContent = 'Thinking...';
+
+            try {
+                const reply = await getCoachReplyHybrid(action); // USE AI hybrid
+                typeText(output, reply);
+            } catch (e) {
+                console.warn('[AI Coach] hybrid failed, using rule-based:', e);
+                typeText(output, buildCoachResponse(action));    // fallback
+            }
+
             renderCoachActions();
         });
     });
@@ -935,3 +947,58 @@ async function initLessonPage() {
 }
 
 document.addEventListener('DOMContentLoaded', initLessonPage);
+
+async function fetchAiCoachReply(action, context) {
+    console.log('[AI Coach] fetchAiCoachReply called', { action, context }); // ADD THIS
+
+    const res = await fetch('/backend/api/ai_coach.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action,
+            lessonTitle: context.lessonTitle || '',
+            lessonContent: context.lessonContent || '',
+            keyPoints: context.keyPoints || []
+        })
+    });
+
+    console.log('[AI Coach] response status:', res.status); // ADD THIS
+
+    if (!res.ok) throw new Error(`AI coach failed (${res.status})`);
+    const data = await res.json();
+    console.log('[AI Coach] response data:', data); // ADD THIS
+    if (!data?.ok || !data?.answer) throw new Error('Invalid AI coach response');
+    return data.answer;
+}
+
+function collectCoachContext() {
+    const lessonTitle =
+        document.querySelector('.lesson-title')?.textContent?.trim() ||
+        document.querySelector('main h2')?.textContent?.trim() ||
+        'Current lesson';
+
+    const lessonContent =
+        document.querySelector('.lesson-content')?.innerText?.trim() ||
+        document.querySelector('.lesson-body')?.innerText?.trim() ||
+        '';
+
+    const keyPoints = Array.from(document.querySelectorAll('.key-points li'))
+        .map(li => li.textContent.trim())
+        .filter(Boolean);
+
+    return { lessonTitle, lessonContent, keyPoints };
+}
+
+async function getCoachReplyHybrid(action) {
+    const context = collectCoachContext();
+    try {
+        return await fetchAiCoachReply(action, context);
+    } catch (e) {
+        console.warn('AI coach unavailable, using fallback:', e);
+        return buildCoachResponse(action); // was getRuleBasedCoachResponse (doesn't exist)
+    }
+}
+
+// Example button handler usage:
+// const text = await getCoachReplyHybrid('Explain Simply');
+// renderCoachMessage(text);
