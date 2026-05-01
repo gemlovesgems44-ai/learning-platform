@@ -531,7 +531,17 @@ function initCoach() {
     });
 }
 
-function updateCoachFromPractice(isCorrect, task, lessonLabel) {
+function buildPracticeCoachFallback(isCorrect, task, lessonLabel, attempts) {
+    return isCorrect
+        ? `Nice work on "${lessonLabel}". ${task.correctFeedback || 'Correct.'} ${getNextSuggestedStep()}`
+        : attempts >= 3
+            ? `${task.wrongFeedback || 'Try again.'} Let's reset: remove wrong options first, then pick the strongest remaining answer.`
+            : attempts === 2
+                ? `${task.wrongFeedback || 'Try again.'} Hint: focus on key terms from this lesson and eliminate distractors.`
+                : `Not quite for "${lessonLabel}". ${task.wrongFeedback || 'Try again.'}`;
+}
+
+async function updateCoachFromPractice(isCorrect, task, lessonLabel) {
     const output = document.getElementById('coach-response');
     if (!output) return;
     const lessonKey = getCurrentLessonKey();
@@ -540,14 +550,28 @@ function updateCoachFromPractice(isCorrect, task, lessonLabel) {
         else coachState.wrongAttemptsByLesson[lessonKey] = (coachState.wrongAttemptsByLesson[lessonKey] || 0) + 1;
     }
     const attempts = getWrongAttemptsCurrentLesson();
-    const msg = isCorrect
-        ? `Nice work on "${lessonLabel}". ${task.correctFeedback || 'Correct.'} ${getNextSuggestedStep()}`
-        : attempts >= 3
-            ? `${task.wrongFeedback || 'Try again.'} Let's reset: remove wrong options first, then pick the strongest remaining answer.`
-            : attempts === 2
-                ? `${task.wrongFeedback || 'Try again.'} Hint: focus on key terms from this lesson and eliminate distractors.`
-                : `Not quite for "${lessonLabel}". ${task.wrongFeedback || 'Try again.'}`;
-    typeText(output, msg);
+
+    const context = collectCoachContext();
+    const practiceSignal = isCorrect ? 'correct_attempt' : `wrong_attempt_${attempts}`;
+    const contextWithPractice = {
+        lessonTitle: context.lessonTitle || lessonLabel || 'Current lesson',
+        lessonContent: [
+            context.lessonContent || '',
+            `Practice status: ${practiceSignal}`,
+            `Learner-facing outcome on correct: ${task.correctFeedback || 'Correct.'}`,
+            `Learner-facing outcome on wrong: ${task.wrongFeedback || 'Try again.'}`,
+            `Suggested next step: ${getNextSuggestedStep()}`
+        ].filter(Boolean).join('\n\n'),
+        keyPoints: context.keyPoints || []
+    };
+
+    try {
+        const aiReply = await fetchAiCoachReply('practice_feedback', contextWithPractice);
+        typeText(output, aiReply);
+    } catch (e) {
+        typeText(output, buildPracticeCoachFallback(isCorrect, task, lessonLabel, attempts));
+    }
+
     renderCoachActions();
 }
 
@@ -872,7 +896,7 @@ function renderPractice(item, nextItemKey, taskTypeOverride = null) {
             : `${task.wrongFeedback || 'Try again.'} You must answer correctly to continue.`;
         feedbackEl.style.color = ok ? '#1b5e20' : '#b71c1c';
         nextBtn.disabled = !ok;
-        updateCoachFromPractice(ok, task, item.label || 'lesson');
+        await updateCoachFromPractice(ok, task, item.label || 'lesson');
 
         const lessonId = Number(item.lessonId || String(item.key || '').replace('lesson-', ''));
         if (!Number.isNaN(lessonId)) {
@@ -944,10 +968,44 @@ async function fetchAiCoachReply(action, context) {
             keyPoints: context.keyPoints || []
         })
     });
-    if (!res.ok) throw new Error(`AI coach failed (${res.status})`);
-    const data = await res.json();
-    if (!data?.ok || !data?.answer) throw new Error('Invalid AI coach response');
-    return data.answer;
+
+    const raw = await res.text();
+    if (!res.ok) {
+        throw new Error(`AI coach failed (${res.status}): ${raw.slice(0, 180)}`);
+    }
+
+    let data = null;
+    try {
+        data = JSON.parse(raw);
+    } catch {
+        // Be tolerant of accidental non-JSON wrappers (e.g. warnings before JSON).
+        const firstBrace = raw.indexOf('{');
+        const lastBrace = raw.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            try {
+                data = JSON.parse(raw.slice(firstBrace, lastBrace + 1));
+            } catch {
+                data = null;
+            }
+        }
+    }
+
+    if (data && typeof data === 'object') {
+        if (data.ok === false) {
+            throw new Error(String(data.message || 'AI coach returned ok=false'));
+        }
+        const answer = String(
+            data.answer ?? data.response ?? data.output_text ?? ''
+        ).trim();
+        if (answer) return answer;
+    }
+
+    const textFallback = String(raw || '').trim();
+    if (textFallback && !textFallback.startsWith('<!DOCTYPE') && !textFallback.startsWith('<html')) {
+        return textFallback;
+    }
+
+    throw new Error('Invalid AI coach response payload');
 }
 
 function collectCoachContext() {
