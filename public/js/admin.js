@@ -34,7 +34,6 @@ async function loadDashboardMetrics() {
         setText('avg-confidence-improvement', data.averageConfidenceImprovement ?? 0);
         setText('practice-success-rate', `${data.practiceSuccessRate ?? 0}%`);
     } catch (error) {
-        console.error('Error loading metrics:', error);
     }
 }
 
@@ -59,7 +58,6 @@ async function loadActivityData() {
             tbody.appendChild(row);
         });
     } catch (error) {
-        console.error('Error loading activity:', error);
     }
 }
 

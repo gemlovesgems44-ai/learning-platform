@@ -9,7 +9,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         renderProgressOverview(progressRows, suggestions);
     } catch (err) {
-        console.error('Failed to load progress overview:', err);
         renderFallback();
     }
 });
@@ -18,10 +17,7 @@ async function fetchProgressData(userId) {
     const res = await fetch(`/backend/api/progress.php?userId=${encodeURIComponent(userId)}`);
     if (!res.ok) throw new Error(`Progress API failed (${res.status})`);
     const data = await res.json();
-
-    console.log('[index] progress raw payload:', data);
-
-    // progress.php shape: { userId, progress: [...], overview: {...} }
+        // progress.php shape: { userId, progress: [...], overview: {...} }
     if (Array.isArray(data?.progress)) return data.progress;
 
     // fallback if endpoint ever returns array directly

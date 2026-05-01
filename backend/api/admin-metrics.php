@@ -172,7 +172,6 @@ try {
                 }
             }
         } catch (Throwable $e) {
-            error_log("lesson performance error: " . $e->getMessage());
         }
     }
 

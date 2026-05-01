@@ -61,19 +61,14 @@ async function saveLessonProgress(lessonId) {
             body: JSON.stringify({ userId, lessonId, moduleId, completed: true })
         });
     } catch (error) {
-        console.warn('Could not save lesson progress:', error);
     }
 }
 
 async function savePracticeResult(lessonId, isCorrect) {
     const userId = Number(localStorage.getItem('userId') || localStorage.getItem('id') || 1); // use || 1 not || 0
     if (!userId || !lessonId) {
-        console.warn('savePracticeResult: missing userId or lessonId', { userId, lessonId });
         return;
     }
-
-    console.log('Saving practice result:', { userId, lessonId, isCorrect }); // debug
-
     const res = await fetch('/backend/api/progress.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -91,7 +86,6 @@ async function savePracticeResult(lessonId, isCorrect) {
     }
 
     const result = await res.json();
-    console.log('Practice result saved:', result); // debug
     return result;
 }
 
@@ -139,7 +133,6 @@ function savePracticeProgress() {
             .filter((id) => Number.isFinite(id) && id > 0);
         localStorage.setItem(getPracticeStorageKey(), JSON.stringify(ids));
     } catch (error) {
-        console.warn('Could not save practice progress:', error);
     }
 }
 
@@ -346,7 +339,7 @@ function renderCurrentItem(itemKey) {
 
     // Keep prompt on summary page
     if (isCourseSummary) {
-        ensureAfterConfidenceCaptured().catch(e => console.warn('after confidence:', e));
+            ensureAfterConfidenceCaptured().catch(() => {});
     }
 
     lessonBodyEl.innerHTML = `
@@ -390,7 +383,6 @@ function renderCurrentItem(itemKey) {
                 }
                 await completeModuleFlow();
             } catch (e) {
-                console.error(e);
                 alert('Could not complete module.');
             }
         });
@@ -524,8 +516,6 @@ function initCoach() {
         btn.dataset.bound = '1';
         btn.addEventListener('click', async () => {          // make async
             const action = btn.dataset.action || 'explain';
-            console.log('[AI Coach] button clicked:', action); // ADD THIS
-
             // show loading state
             output.textContent = 'Thinking...';
 
@@ -533,7 +523,6 @@ function initCoach() {
                 const reply = await getCoachReplyHybrid(action); // USE AI hybrid
                 typeText(output, reply);
             } catch (e) {
-                console.warn('[AI Coach] hybrid failed, using rule-based:', e);
                 typeText(output, buildCoachResponse(action));    // fallback
             }
 
@@ -687,7 +676,6 @@ function showFeedbackForm(userId, moduleId) {
                 overlay.remove();
                 resolve(true);
             } catch (err) {
-                console.error('Error submitting feedback:', err);
                 alert('Could not save feedback. Please try again.');
             }
         });
@@ -891,7 +879,6 @@ function renderPractice(item, nextItemKey, taskTypeOverride = null) {
             try {
                 await savePracticeResult(lessonId, ok); // save both correct and wrong attempts
             } catch (e) {
-                console.warn('Could not save practice result:', e);
             }
         }
 
@@ -934,10 +921,8 @@ async function initLessonPage() {
             const rating = await askConfidence('before', false);
             if (rating) await saveConfidenceRating(rating, 'before');
         } catch (e) {
-            console.warn('Could not save before confidence rating:', e);
         }
     } catch (error) {
-        console.error(error);
         const lessonTitleEl = document.getElementById('lesson-title');
         const lessonBodyEl = document.getElementById('lesson-body');
         if (lessonTitleEl) lessonTitleEl.textContent = 'Lesson unavailable';
@@ -949,8 +934,6 @@ async function initLessonPage() {
 document.addEventListener('DOMContentLoaded', initLessonPage);
 
 async function fetchAiCoachReply(action, context) {
-    console.log('[AI Coach] fetchAiCoachReply called', { action, context }); // ADD THIS
-
     const res = await fetch('/backend/api/ai_coach.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -961,12 +944,8 @@ async function fetchAiCoachReply(action, context) {
             keyPoints: context.keyPoints || []
         })
     });
-
-    console.log('[AI Coach] response status:', res.status); // ADD THIS
-
     if (!res.ok) throw new Error(`AI coach failed (${res.status})`);
     const data = await res.json();
-    console.log('[AI Coach] response data:', data); // ADD THIS
     if (!data?.ok || !data?.answer) throw new Error('Invalid AI coach response');
     return data.answer;
 }
@@ -994,7 +973,6 @@ async function getCoachReplyHybrid(action) {
     try {
         return await fetchAiCoachReply(action, context);
     } catch (e) {
-        console.warn('AI coach unavailable, using fallback:', e);
         return buildCoachResponse(action); // was getRuleBasedCoachResponse (doesn't exist)
     }
 }

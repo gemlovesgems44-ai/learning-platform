@@ -26,6 +26,5 @@ document.getElementById('login-form').addEventListener('submit', function(e) {
     })
     .catch(error => {
         document.getElementById('error-message').textContent = 'Login failed';
-        console.error('Error:', error);
     });
 });

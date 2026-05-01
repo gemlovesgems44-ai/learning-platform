@@ -10,7 +10,6 @@ function fetchCourses() {
             displayCourses(data);
         })
         .catch(error => {
-            console.error('Error fetching courses:', error);
             document.getElementById('courses-container').innerHTML = '<p>Error loading courses</p>';
         });
 }

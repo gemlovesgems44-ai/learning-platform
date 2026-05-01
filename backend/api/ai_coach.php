@@ -11,8 +11,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $apiKey = getenv('OPENAI_API_KEY');
-error_log('[ai_coach] API key present: ' . ($apiKey ? 'YES (len=' . strlen($apiKey) . ')' : 'NO'));
-
 if (!$apiKey) {
     http_response_code(500);
     echo json_encode(['ok' => false, 'message' => 'AI key not configured']);
@@ -89,7 +87,6 @@ $curlErr = curl_error($ch);
 curl_close($ch);
 
 if ($raw === false || $httpCode >= 400) {
-    error_log('[ai_coach] OpenAI HTTP ' . $httpCode . ' error: ' . ($curlErr ?: $raw));
     http_response_code(502);
     echo json_encode([
         'ok' => false,

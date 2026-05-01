@@ -150,7 +150,6 @@ try {
                 $aiSuggestion = $decoded;
             }
         } else {
-            error_log('[suggestions] AI failed HTTP ' . $httpCode);
         }
     }
 

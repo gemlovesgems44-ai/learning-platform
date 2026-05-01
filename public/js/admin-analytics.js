@@ -164,7 +164,6 @@ async function loadAnalyticsMetrics() {
             }
         }
     } catch (error) {
-        console.error('Error loading analytics metrics:', error);
     }
 }
 

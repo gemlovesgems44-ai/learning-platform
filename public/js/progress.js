@@ -10,15 +10,10 @@ document.addEventListener('DOMContentLoaded', async function () {
             fetchModulesData()
         ]);
 
-        console.log('[progress] progressData:', progressData);
-        console.log('[progress] modulesData:', modulesData);
-        console.log('[progress] confidence rows:', progressData.filter(p => p.confidence_before != null || p.confidence_after != null));
-
         renderProgress(progressData);
         const recommended = renderAdaptiveSuggestions(progressData, suggestions, modulesData);
         renderOverview(progressData, suggestions, modulesData, recommended, aiSuggestion);
     } catch (error) {
-        console.error('Error loading progress page:', error);
         const progressList = document.getElementById('progress-list');
         const suggestions = document.getElementById('suggestions');
         if (progressList) progressList.innerHTML = '<p>Could not load progress data.</p>';
@@ -53,8 +48,6 @@ async function fetchProgressData(userId) {
     if (!res.ok) throw new Error(`Progress API failed (${res.status})`);
 
     const payload = await res.json();
-    console.log('[progress] raw payload:', payload);
-
     // IMPORTANT: progress.php returns { progress: [...], overview: {...} }
     const progressData = Array.isArray(payload?.progress) ? payload.progress : [];
     const overview = payload?.overview ?? {
@@ -70,8 +63,6 @@ async function fetchSuggestionsData(userId) {
     const res = await fetch(`/backend/api/suggestions.php?userId=${encodeURIComponent(userId)}`);
     if (!res.ok) throw new Error(`Suggestions API failed (${res.status})`);
     const data = await res.json();
-    console.log('[suggestions] payload:', data);
-
     // normalize: now returns { suggestions: [...], aiSuggestion: {...}|null }
     const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : (Array.isArray(data) ? data : []);
     const aiSuggestion = data?.aiSuggestion ?? null;
@@ -370,15 +361,12 @@ function normalizeConfidenceValue(v) {
 function renderConfidenceSummary(progressData) {
     const host = document.getElementById('ov-confidence');
     if (!host) {
-        console.warn('[confidence] ov-confidence element not found');
         return;
     }
 
     const rows = progressData.filter(p =>
         p.confidence_before != null || p.confidence_after != null
     );
-
-    console.log('[confidence] rows with data:', rows);
 
     if (!rows.length) {
         host.textContent = 'No confidence data yet.';

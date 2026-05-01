@@ -19,7 +19,7 @@ function loadCourses() {
         .then(data => {
             displayCourses(data);
         })
-        .catch(error => console.error('Error loading courses:', error));
+            .catch(() => {});
 }
 
 function displayCourses(courses) {
@@ -55,7 +55,7 @@ function loadLessons(courseId) {
         .then(data => {
             displayLessons(courseId, data);
         })
-        .catch(error => console.error('Error loading lessons:', error));
+            .catch(() => {});
 }
 
 function displayLessons(courseId, lessons) {
@@ -121,7 +121,7 @@ function deleteCourse(courseId) {
             alert('Course deleted');
             loadCourses();
         })
-        .catch(error => console.error('Error deleting course:', error));
+            .catch(() => {});
     }
 }
 
@@ -135,7 +135,7 @@ function deleteLesson(lessonId) {
             alert('Lesson deleted');
             loadCourses();
         })
-        .catch(error => console.error('Error deleting lesson:', error));
+            .catch(() => {});
     }
 }
 
@@ -167,7 +167,6 @@ function setupModalHandlers() {
             loadCourses();
         })
         .catch(error => {
-            console.error('Error:', error);
             alert('Error saving lesson');
         });
     });
